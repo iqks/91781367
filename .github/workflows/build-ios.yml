@@ -1,0 +1,39 @@
+name: Build iOS unsigned IPA
+# 触发方式：推送 main 分支，或网页手动点击 Run workflow
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build_ios:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Flutter 环境
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.5'   # 与本地 Flutter 版本保持一致
+          channel: stable
+          cache: true
+
+      - name: 安装依赖
+        run: flutter pub get
+
+      - name: 安装 CocoaPods
+        run: |
+          cd ios
+          pod install
+          cd ..
+
+      - name: 编译未签名 IPA（关键参数 --no-codesign，专供全能签）
+        run: flutter build ipa --release --no-codesign
+
+      - name: 上传 IPA 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-ipa
+          path: build/ios/ipa/*.ipa
