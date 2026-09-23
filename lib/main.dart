@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 
 void main() {
   runApp(const LiquidGlassApp());
@@ -31,6 +32,8 @@ class LiquidGlassApp extends StatelessWidget {
 
 /// 判断当前设备系统版本是否支持原生液态玻璃（iOS 26+）
 bool supportLiquidGlass() {
+  // Web / 桌面预览时直接返回 false，避免 dart:io 平台异常
+  if (kIsWeb) return false;
   if (!Platform.isIOS) return false;
   final major =
       int.tryParse(Platform.operatingSystemVersion.split('.').first) ?? 0;
@@ -50,6 +53,9 @@ Color navBarBackground(BuildContext context) {
 
 /// 显示当前 iOS 版本与玻璃模式的提示文案
 String glassModeText(BuildContext context) {
+  if (kIsWeb) {
+    return '当前平台：Web 预览模式\n打包安装到 iPhone 后自动生效';
+  }
   if (!Platform.isIOS) {
     return '当前平台：非 iOS（预览模式）\n打包安装到 iPhone 后自动生效';
   }
