@@ -10,11 +10,14 @@ void main() {
 /// ============================================================
 ///  iOS 原生风格 App Demo（Cupertino 组件）
 ///
-///  结构：打开 App 就是「底部导航栏 + 各标签页」
-///  - 底部导航栏：CupertinoTabBar（iOS 原生底部标签栏，自带毛玻璃）
-///  - 每个标签页：顶部 CupertinoNavigationBar + 简单内容
-///  - 液态玻璃规则：iOS 26+ 更通透（模拟液态玻璃）；旧系统传统磨砂
-///  - 全部 Flutter 自带 Cupertino 组件，GitHub Actions 打包稳定
+///  结构：打开 App 就是「官方风格底部导航栏 + 各标签页」
+///  - 底部导航栏：CupertinoTabBar
+///    （Flutter 官方对 iOS 系统 UITabBar 的实现，
+///      即 App Store 那种底部栏：半透明磨砂、图标+文字）
+///  - 4 个标签：首页 / 功能 / 分享 / 设置
+///  - 每个标签页：顶部 CupertinoNavigationBar（液态玻璃）+ 内容
+///  - 液态玻璃规则：iOS 26+ 更通透；旧系统传统磨砂
+///  - 纯 Flutter 自带 Cupertino 组件，GitHub Actions 打包稳定
 /// ============================================================
 class LiquidGlassApp extends StatelessWidget {
   const LiquidGlassApp({super.key});
@@ -50,7 +53,7 @@ Color navBarBackground(BuildContext context) {
   return CupertinoDynamicColor.resolve(color, context);
 }
 
-/// 主页面：iOS 原生底部标签导航栏（CupertinoTabBar）
+/// 主页面：官方风格底部标签导航栏（CupertinoTabBar）
 class MainTabPage extends StatelessWidget {
   const MainTabPage({super.key});
 
@@ -64,15 +67,19 @@ class MainTabPage extends StatelessWidget {
             label: '首页',
           ),
           BottomNavigationBarItem(
-            icon: Icon(CupertinoIcons.search),
-            label: '搜索',
+            icon: Icon(CupertinoIcons.square_stack_3d),
+            label: '功能',
           ),
           BottomNavigationBarItem(
-            icon: Icon(CupertinoIcons.person),
-            label: '我的',
+            icon: Icon(CupertinoIcons.arrowshape_turn_up_right),
+            label: '分享',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(CupertinoIcons.gear),
+            label: '设置',
           ),
         ],
-        // 底部导航栏毛玻璃背景，自动适配液态玻璃
+        // 底部导航栏半透明毛玻璃背景，自动适配液态玻璃
         backgroundColor: navBarBackground(context),
         // 去掉顶部分隔线，更贴近 iOS 原生
         border: null,
@@ -83,9 +90,11 @@ class MainTabPage extends StatelessWidget {
           case 0:
             return const _HomeTab();
           case 1:
-            return const _SearchTab();
+            return const _FeatureTab();
+          case 2:
+            return const _ShareTab();
           default:
-            return const _ProfileTab();
+            return const _SettingsTab();
         }
       },
     );
@@ -106,33 +115,16 @@ class _HomeTab extends StatelessWidget {
             backgroundColor: navBarBackground(context),
             border: null,
           ),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(CupertinoIcons.house_fill, size: 48),
-                const SizedBox(height: 12),
-                const Text('首页内容', style: TextStyle(fontSize: 18)),
-                const SizedBox(height: 8),
-                Text(
-                  supportLiquidGlass() ? '液态玻璃模式' : '传统磨砂模式',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: CupertinoColors.secondaryLabel,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          child: const _EmptyContent(icon: CupertinoIcons.house_fill),
         );
       },
     );
   }
 }
 
-/// 标签页 2：搜索
-class _SearchTab extends StatelessWidget {
-  const _SearchTab();
+/// 标签页 2：功能
+class _FeatureTab extends StatelessWidget {
+  const _FeatureTab();
 
   @override
   Widget build(BuildContext context) {
@@ -140,29 +132,20 @@ class _SearchTab extends StatelessWidget {
       builder: (context) {
         return CupertinoPageScaffold(
           navigationBar: CupertinoNavigationBar(
-            middle: const Text('搜索'),
+            middle: const Text('功能'),
             backgroundColor: navBarBackground(context),
             border: null,
           ),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(CupertinoIcons.search, size: 48),
-                const SizedBox(height: 12),
-                const Text('搜索内容', style: TextStyle(fontSize: 18)),
-              ],
-            ),
-          ),
+          child: const _EmptyContent(icon: CupertinoIcons.square_stack_3d_fill),
         );
       },
     );
   }
 }
 
-/// 标签页 3：我的
-class _ProfileTab extends StatelessWidget {
-  const _ProfileTab();
+/// 标签页 3：分享
+class _ShareTab extends StatelessWidget {
+  const _ShareTab();
 
   @override
   Widget build(BuildContext context) {
@@ -170,22 +153,65 @@ class _ProfileTab extends StatelessWidget {
       builder: (context) {
         return CupertinoPageScaffold(
           navigationBar: CupertinoNavigationBar(
-            middle: const Text('我的'),
+            middle: const Text('分享'),
             backgroundColor: navBarBackground(context),
             border: null,
           ),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(CupertinoIcons.person_fill, size: 48),
-                const SizedBox(height: 12),
-                const Text('我的内容', style: TextStyle(fontSize: 18)),
-              ],
-            ),
+          child: const _EmptyContent(
+            icon: CupertinoIcons.arrowshape_turn_up_right_fill,
           ),
         );
       },
+    );
+  }
+}
+
+/// 标签页 4：设置
+class _SettingsTab extends StatelessWidget {
+  const _SettingsTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoTabView(
+      builder: (context) {
+        return CupertinoPageScaffold(
+          navigationBar: CupertinoNavigationBar(
+            middle: const Text('设置'),
+            backgroundColor: navBarBackground(context),
+            border: null,
+          ),
+          child: const _EmptyContent(icon: CupertinoIcons.gear_alt_fill),
+        );
+      },
+    );
+  }
+}
+
+/// 简单的标签页内容占位
+class _EmptyContent extends StatelessWidget {
+  const _EmptyContent({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 48, color: CupertinoColors.systemBlue),
+          const SizedBox(height: 12),
+          const Text('页面内容', style: TextStyle(fontSize: 16)),
+          const SizedBox(height: 8),
+          Text(
+            supportLiquidGlass() ? '液态玻璃模式' : '传统磨砂模式',
+            style: const TextStyle(
+              fontSize: 13,
+              color: CupertinoColors.secondaryLabel,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
