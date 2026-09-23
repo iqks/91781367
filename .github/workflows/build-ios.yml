@@ -13,32 +13,37 @@ jobs:
       - name: Checkout 拉取代码
         uses: actions/checkout@v4
 
-      - name: 设置 Flutter 环境
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.35.5'   # 与本地 Flutter 版本保持一致
-          channel: stable
-          cache: true
+      - name: 安装 xcodegen（生成 Xcode 项目）
+        run: brew install xcodegen
 
-      - name: 安装依赖
-        run: flutter pub get
+      - name: 生成 Xcode 项目
+        run: |
+          cd LiquidGlassApp
+          xcodegen generate
 
-      # flutter build ipa --no-codesign 会跳过 IPA 生成（只出 xcarchive），
-      # 所以改用 flutter build ios 生成 .app，再手动打包成未签名 IPA
-      - name: 编译未签名 App
-        run: flutter build ios --release --no-codesign
+      - name: 编译未签名 App（CODE_SIGNING_ALLOWED=NO 关闭签名）
+        run: |
+          cd LiquidGlassApp
+          xcodebuild \
+            -project LiquidGlassApp.xcodeproj \
+            -scheme LiquidGlassApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
 
       - name: 手动打包为未签名 IPA（供全能签签名）
         run: |
-          cd build/ios/iphoneos
-          mkdir -p Payload
-          cp -R Runner.app Payload/
-          mkdir -p ../ipa
-          zip -r ../ipa/liquid_glass_app.ipa Payload
-          cd ../../..
+          cd LiquidGlassApp
+          mkdir -p build/Payload
+          cp -R "build/Build/Products/Release-iphoneos/LiquidGlassApp.app" build/Payload/
+          cd build
+          zip -r LiquidGlassApp.ipa Payload
 
       - name: 上传 IPA 产物
         uses: actions/upload-artifact@v4
         with:
           name: ios-unsigned-ipa
-          path: build/ios/ipa/*.ipa
+          path: LiquidGlassApp/build/LiquidGlassApp.ipa
