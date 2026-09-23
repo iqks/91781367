@@ -67,7 +67,7 @@ class MainTabPage extends StatelessWidget {
             label: '首页',
           ),
           BottomNavigationBarItem(
-            icon: Icon(CupertinoIcons.square_stack_3d),
+            icon: Icon(CupertinoIcons.square_stack),
             label: '功能',
           ),
           BottomNavigationBarItem(
@@ -136,7 +136,7 @@ class _FeatureTab extends StatelessWidget {
             backgroundColor: navBarBackground(context),
             border: null,
           ),
-          child: const _EmptyContent(icon: CupertinoIcons.square_stack_3d_fill),
+          child: const _EmptyContent(icon: CupertinoIcons.square_stack_fill),
         );
       },
     );
