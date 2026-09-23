@@ -1,12 +1,18 @@
-name: Build iOS unsigned IPA
+name: Build & Sign iOS IPA
 # 触发方式：推送 main 分支，或网页手动点击 Run workflow
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      two_fa:
+        description: 'Apple ID 双重验证码（6位，Apple 要求时填写）'
+        required: false
+        default: ''
 
 jobs:
-  build_ios:
+  # ============ 第一步：编译 SwiftUI 项目，产出未签名 IPA ============
+  build:
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
@@ -34,7 +40,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             build
 
-      - name: 手动打包为未签名 IPA（供全能签签名）
+      - name: 手动打包为未签名 IPA
         run: |
           cd LiquidGlassApp
           mkdir -p build/Payload
@@ -42,8 +48,58 @@ jobs:
           cd build
           zip -r LiquidGlassApp.ipa Payload
 
-      - name: 上传 IPA 产物
+      - name: 上传未签名 IPA
         uses: actions/upload-artifact@v4
         with:
           name: ios-unsigned-ipa
           path: LiquidGlassApp/build/LiquidGlassApp.ipa
+
+  # ============ 第二步：用免费 Apple ID 证书自动签名 ============
+  # 需要先配置 GitHub Secrets：APPLE_ID / APPLE_PASSWORD / DEVICE_UDID
+  # 未配置时此步骤自动跳过（只出未签名 IPA）
+  sign:
+    needs: build
+    if: secrets.APPLE_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 下载未签名 IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-unsigned-ipa
+          path: unsigned
+
+      - name: 安装签名工具依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev pkg-config unzip
+          python3 -m pip install --upgrade pip
+          git clone --depth 1 https://github.com/test1ng-guy/iOS-sandbox-explorer.git signer
+          python3 -m pip install -r signer/tools/requirements.txt
+
+      - name: 编译安装 zsign（重签名工具，原理同全能签）
+        run: |
+          git clone --depth 1 https://github.com/zhlynn/zsign.git
+          cd zsign
+          cmake .
+          make -j2
+          sudo cp zsign /usr/local/bin/
+          zsign --help | head -3 || true
+
+      - name: Apple ID 认证并签名（SRP 协议，密码不落盘）
+        run: |
+          {
+            echo "${{ secrets.APPLE_ID }}"
+            echo "${{ secrets.APPLE_PASSWORD }}"
+            echo "${{ inputs.two_fa }}"
+          } | python3 signer/tools/apple_account.py sign \
+            --ipa "unsigned/LiquidGlassApp.ipa" \
+            -o "LiquidGlassApp_signed.ipa" \
+            --udid "${{ secrets.DEVICE_UDID }}" \
+            --bundle-id "com.example.liquidglass"
+
+      - name: 上传已签名 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-signed-ipa
+          path: LiquidGlassApp_signed.ipa
