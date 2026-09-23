@@ -23,8 +23,19 @@ jobs:
       - name: 安装依赖
         run: flutter pub get
 
-      - name: 编译未签名 IPA（--no-codesign 专供全能签，纯 Dart 项目无需 CocoaPods）
-        run: flutter build ipa --release --no-codesign
+      # flutter build ipa --no-codesign 会跳过 IPA 生成（只出 xcarchive），
+      # 所以改用 flutter build ios 生成 .app，再手动打包成未签名 IPA
+      - name: 编译未签名 App
+        run: flutter build ios --release --no-codesign
+
+      - name: 手动打包为未签名 IPA（供全能签签名）
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/
+          mkdir -p ../ipa
+          zip -r ../ipa/liquid_glass_app.ipa Payload
+          cd ../../..
 
       - name: 上传 IPA 产物
         uses: actions/upload-artifact@v4
