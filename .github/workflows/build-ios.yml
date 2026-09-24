@@ -30,6 +30,7 @@ jobs:
       - name: 编译未签名 App（关闭签名）
         run: |
           cd LiquidGlassApp
+          set -o pipefail
           xcodebuild \
             -project LiquidGlassApp.xcodeproj \
             -scheme LiquidGlassApp \
@@ -38,7 +39,14 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            build
+            build 2>&1 | tee /tmp/build.log | tail -200
+
+      - name: 上传编译日志（失败时排查用）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-error-log
+          path: /tmp/build.log
 
       - name: 手动打包为未签名 IPA
         run: |
