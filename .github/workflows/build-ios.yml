@@ -27,7 +27,7 @@ jobs:
           cd LiquidGlassApp
           xcodegen generate
 
-      - name: 编译未签名 App（CODE_SIGNING_ALLOWED=NO 关闭签名）
+      - name: 编译未签名 App（关闭签名）
         run: |
           cd LiquidGlassApp
           xcodebuild \
@@ -55,27 +55,25 @@ jobs:
           path: LiquidGlassApp/build/LiquidGlassApp.ipa
 
   # ============ 第二步：用免费 Apple ID 证书自动签名 ============
-  # 需要先配置 GitHub Secrets：APPLE_ID / APPLE_PASSWORD / DEVICE_UDID
-  # 未配置时此步骤自动跳过（只出未签名 IPA）
+  # 需要先在 GitHub Secrets 配置：APPLE_ID / APPLE_PASSWORD / DEVICE_UDID
+  # 未配置时脚本自动跳过（只出未签名 IPA）
   sign:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      DEVICE_UDID: ${{ secrets.DEVICE_UDID }}
+      TWO_FA: ${{ inputs.two_fa }}
     steps:
-      - name: 检查是否配置了 Apple ID
-        id: check
-        if: secrets.APPLE_ID != ''
-        run: echo "ok=true" >> "$GITHUB_OUTPUT"
-
       - name: 下载未签名 IPA
-        if: steps.check.outputs.ok == 'true'
         uses: actions/download-artifact@v4
         with:
           name: ios-unsigned-ipa
           path: unsigned
 
       - name: 安装签名工具依赖
-        if: steps.check.outputs.ok == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libssl-dev pkg-config unzip
@@ -84,30 +82,33 @@ jobs:
           python3 -m pip install -r signer/tools/requirements.txt
 
       - name: 编译安装 zsign（重签名工具，原理同全能签）
-        if: steps.check.outputs.ok == 'true'
         run: |
           git clone --depth 1 https://github.com/zhlynn/zsign.git
           cd zsign
           cmake .
           make -j2
           sudo cp zsign /usr/local/bin/
-          zsign --help | head -3 || true
+          zsign --help >/dev/null 2>&1 && echo "zsign 安装成功" || echo "zsign 安装失败"
 
-      - name: Apple ID 认证并签名（SRP 协议，密码不落盘）
-        if: steps.check.outputs.ok == 'true'
+      - name: Apple ID 认证并签名（未配置则自动跳过）
         run: |
+          if [ -z "$APPLE_ID" ]; then
+            echo "未配置 APPLE_ID，跳过签名步骤（已产出未签名 IPA）"
+            exit 0
+          fi
           {
-            echo "${{ secrets.APPLE_ID }}"
-            echo "${{ secrets.APPLE_PASSWORD }}"
-            echo "${{ inputs.two_fa }}"
+            echo "$APPLE_ID"
+            echo "$APPLE_PASSWORD"
+            echo "$TWO_FA"
           } | python3 signer/tools/apple_account.py sign \
             --ipa "unsigned/LiquidGlassApp.ipa" \
             -o "LiquidGlassApp_signed.ipa" \
-            --udid "${{ secrets.DEVICE_UDID }}" \
+            --udid "$DEVICE_UDID" \
             --bundle-id "com.example.liquidglass"
+          ls -la LiquidGlassApp_signed.ipa
 
       - name: 上传已签名 IPA
-        if: steps.check.outputs.ok == 'true'
+        if: env.APPLE_ID != ''
         uses: actions/upload-artifact@v4
         with:
           name: ios-signed-ipa
