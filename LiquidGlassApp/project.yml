@@ -9,12 +9,18 @@ targets:
     platform: iOS
     sources:
       - LiquidGlassApp
+    info:
+      path: LiquidGlassApp/Info.plist
+      properties:
+        CFBundleDisplayName: 液态玻璃
+        UILaunchScreen: {}
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
     settings:
       base:
-        GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.example.liquidglass
-        INFOPLIST_KEY_CFBundleDisplayName: 液态玻璃
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
         SWIFT_VERSION: "5.0"

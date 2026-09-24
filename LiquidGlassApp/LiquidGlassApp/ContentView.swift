@@ -252,6 +252,9 @@ struct AllComponentsView: View {
                     NavigationLink("手势交互 Gesture", destination: GestureViewPage())
                     NavigationLink("悬浮按钮 FloatingButton", destination: FloatingButtonView())
                 }
+                Section("后台") {
+                    NavigationLink("后台公告 RemoteContent", destination: RemoteContentView())
+                }
             }
             .navigationTitle("组件大全")
         }
@@ -1075,6 +1078,151 @@ struct FloatingButtonView: View {
             }
         }
         .navigationTitle("悬浮按钮")
+    }
+}
+
+// MARK: - 后台公告（远程内容，从自己电脑上的后台拉取）
+
+struct Announcement: Codable, Identifiable {
+    var id: Int
+    var title: String
+    var content: String
+    var time: String
+}
+
+struct RemoteData: Codable {
+    var app_name: String
+    var welcome: String
+    var announcements: [Announcement]
+}
+
+struct RemoteContentView: View {
+    @State private var data: RemoteData?
+    @State private var loading = true
+    @State private var errorMsg: String?
+    @State private var showConfig = false
+    @AppStorage("remoteURL") private var remoteURL = "http://localhost:8088"
+
+    var body: some View {
+        List {
+            Section("后台连接") {
+                Label("数据源：\(remoteURL)", systemImage: "link")
+                Label("内容由网页后台修改后自动下发", systemImage: "arrow.down.circle")
+                Label("下拉可刷新", systemImage: "arrow.clockwise")
+            }
+            if loading {
+                Section {
+                    ProgressView("正在从后台加载…")
+                }
+            }
+            if let err = errorMsg {
+                Section("加载失败") {
+                    Text(err)
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                    Button("重新加载") {
+                        Task { await load() }
+                    }
+                }
+            }
+            if let d = data {
+                Section("欢迎语") {
+                    Text(d.welcome)
+                        .font(.headline)
+                }
+                Section("公告（\(d.announcements.count) 条）") {
+                    ForEach(d.announcements) { a in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(a.title)
+                                .font(.headline)
+                            Text(a.content)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text(a.time)
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+        .navigationTitle(data?.app_name ?? "后台公告")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showConfig = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+            }
+        }
+        .sheet(isPresented: $showConfig) {
+            RemoteConfigView(remoteURL: $remoteURL)
+        }
+        .refreshable {
+            await load()
+        }
+        .task {
+            await load()
+        }
+    }
+
+    func load() async {
+        loading = true
+        errorMsg = nil
+        var urlString = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if urlString.hasSuffix("/") { urlString.removeLast() }
+        if !urlString.contains("/api/content") {
+            urlString += "/api/content"
+        }
+        guard let url = URL(string: urlString) else {
+            errorMsg = "地址无效，请点右上角齿轮检查后台地址"
+            loading = false
+            return
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            self.data = try JSONDecoder().decode(RemoteData.self, from: data)
+        } catch {
+            errorMsg = "连接失败：\(error.localizedDescription)\n请确认：\n① 电脑上的后台已启动\n② 地址正确（电脑本机/局域网IP/飞鸽公网地址）"
+        }
+        loading = false
+    }
+}
+
+struct RemoteConfigView: View {
+    @Binding var remoteURL: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("后台地址") {
+                    TextField("http://192.168.1.100:8088", text: $remoteURL)
+                        .keyboardType(.URL)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
+                Section("怎么填") {
+                    Label("电脑本机测试: http://localhost:8088", systemImage: "desktopcomputer")
+                    Label("iPhone 连同一 Wi-Fi: http://电脑IP:8088", systemImage: "wifi")
+                    Label("外网（飞鸽穿透）: http://xxxx.fgnb.top", systemImage: "globe")
+                }
+                Section {
+                    Button("恢复默认地址") {
+                        remoteURL = "http://localhost:8088"
+                    }
+                }
+            }
+            .navigationTitle("后台地址设置")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 
