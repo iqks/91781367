@@ -1092,7 +1092,6 @@ struct Announcement: Codable, Identifiable {
 
 struct RemoteData: Codable {
     var app_name: String
-    var welcome: String
     var announcements: [Announcement]
 }
 
@@ -1126,11 +1125,7 @@ struct RemoteContentView: View {
                 }
             }
             if let d = data {
-                Section("欢迎语") {
-                    Text(d.welcome)
-                        .font(.headline)
-                }
-                Section("公告（\(d.announcements.count) 条）") {
+                Section("公告（\(d.announcements.count) 条，打开 App 自动弹出）") {
                     ForEach(d.announcements) { a in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(a.title)
