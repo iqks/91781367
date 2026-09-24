@@ -59,17 +59,23 @@ jobs:
   # 未配置时此步骤自动跳过（只出未签名 IPA）
   sign:
     needs: build
-    if: secrets.APPLE_ID != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: 检查是否配置了 Apple ID
+        id: check
+        if: secrets.APPLE_ID != ''
+        run: echo "ok=true" >> "$GITHUB_OUTPUT"
+
       - name: 下载未签名 IPA
+        if: steps.check.outputs.ok == 'true'
         uses: actions/download-artifact@v4
         with:
           name: ios-unsigned-ipa
           path: unsigned
 
       - name: 安装签名工具依赖
+        if: steps.check.outputs.ok == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libssl-dev pkg-config unzip
@@ -78,6 +84,7 @@ jobs:
           python3 -m pip install -r signer/tools/requirements.txt
 
       - name: 编译安装 zsign（重签名工具，原理同全能签）
+        if: steps.check.outputs.ok == 'true'
         run: |
           git clone --depth 1 https://github.com/zhlynn/zsign.git
           cd zsign
@@ -87,6 +94,7 @@ jobs:
           zsign --help | head -3 || true
 
       - name: Apple ID 认证并签名（SRP 协议，密码不落盘）
+        if: steps.check.outputs.ok == 'true'
         run: |
           {
             echo "${{ secrets.APPLE_ID }}"
@@ -99,6 +107,7 @@ jobs:
             --bundle-id "com.example.liquidglass"
 
       - name: 上传已签名 IPA
+        if: steps.check.outputs.ok == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ios-signed-ipa
