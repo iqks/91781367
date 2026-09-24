@@ -5,7 +5,7 @@ struct LiquidGlassApp: App {
     @State private var noticeText = ""
     @State private var noticeLink: String?
     @State private var showNotice = false
-    @AppStorage("remoteURL") private var remoteURL = "http://localhost:8088"
+    @AppStorage("remoteURL") private var remoteURL = "https://iqks.github.io/91781367/notice.json"
     @Environment(\.openURL) private var openURL
 
     var body: some Scene {
@@ -31,7 +31,9 @@ struct LiquidGlassApp: App {
     func fetchAnnouncement() async {
         var urlString = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if urlString.hasSuffix("/") { urlString.removeLast() }
-        if !urlString.contains("/api/content") { urlString += "/api/content" }
+        if !urlString.contains("/api/content") && !urlString.hasSuffix(".json") {
+            urlString += "/api/content"
+        }
         guard let url = URL(string: urlString) else { return }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)

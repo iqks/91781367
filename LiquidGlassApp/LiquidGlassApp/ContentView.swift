@@ -1101,7 +1101,7 @@ struct RemoteContentView: View {
     @State private var loading = true
     @State private var errorMsg: String?
     @State private var showConfig = false
-    @AppStorage("remoteURL") private var remoteURL = "http://localhost:8088"
+    @AppStorage("remoteURL") private var remoteURL = "https://iqks.github.io/91781367/notice.json"
 
     var body: some View {
         List {
@@ -1169,7 +1169,7 @@ struct RemoteContentView: View {
         errorMsg = nil
         var urlString = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if urlString.hasSuffix("/") { urlString.removeLast() }
-        if !urlString.contains("/api/content") {
+        if !urlString.contains("/api/content") && !urlString.hasSuffix(".json") {
             urlString += "/api/content"
         }
         guard let url = URL(string: urlString) else {
@@ -1201,13 +1201,14 @@ struct RemoteConfigView: View {
                         .textInputAutocapitalization(.never)
                 }
                 Section("怎么填") {
+                    Label("默认（推荐）: GitHub 托管公告，WiFi/4G 都能连", systemImage: "cloud")
                     Label("电脑本机测试: http://localhost:8088", systemImage: "desktopcomputer")
                     Label("iPhone 连同一 Wi-Fi: http://电脑IP:8088", systemImage: "wifi")
                     Label("外网（飞鸽穿透）: http://xxxx.fgnb.top", systemImage: "globe")
                 }
                 Section {
-                    Button("恢复默认地址") {
-                        remoteURL = "http://localhost:8088"
+                    Button("恢复默认地址（GitHub 公告）") {
+                        remoteURL = "https://iqks.github.io/91781367/notice.json"
                     }
                 }
             }
