@@ -16,6 +16,7 @@ targets:
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: App 需要访问本地网络，以连接你电脑上的内容后台
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
     settings:
