@@ -81,14 +81,14 @@ jobs:
           git clone --depth 1 https://github.com/test1ng-guy/iOS-sandbox-explorer.git signer
           python3 -m pip install -r signer/tools/requirements.txt
 
-      - name: 编译安装 zsign（重签名工具，原理同全能签）
+      - name: 下载 zsign 预编译版（重签名工具，原理同全能签）
         run: |
-          git clone --depth 1 https://github.com/zhlynn/zsign.git
-          cd zsign
-          cmake .
-          make -j2
-          sudo cp zsign /usr/local/bin/
-          zsign --help >/dev/null 2>&1 && echo "zsign 安装成功" || echo "zsign 安装失败"
+          curl -sL -o zsign.tar.gz https://github.com/zhlynn/zsign/releases/download/v1.1.2/zsign-linux-x86_64.tar.gz
+          tar -xzf zsign.tar.gz
+          ls -la
+          find . -name "zsign*" -type f | head -5
+          sudo cp zsign /usr/local/bin/ 2>/dev/null || sudo cp $(find . -name "zsign" -type f | head -1) /usr/local/bin/
+          zsign --help 2>&1 | head -3 || echo "zsign 就绪"
 
       - name: Apple ID 认证并签名（未配置则自动跳过）
         run: |
