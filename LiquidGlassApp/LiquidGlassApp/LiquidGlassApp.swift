@@ -3,8 +3,10 @@ import SwiftUI
 @main
 struct LiquidGlassApp: App {
     @State private var noticeText = ""
+    @State private var noticeLink: String?
     @State private var showNotice = false
     @AppStorage("remoteURL") private var remoteURL = "http://localhost:8088"
+    @Environment(\.openURL) private var openURL
 
     var body: some Scene {
         WindowGroup {
@@ -14,6 +16,11 @@ struct LiquidGlassApp: App {
                 }
                 .alert("公告", isPresented: $showNotice) {
                     Button("知道了", role: .cancel) {}
+                    if let link = noticeLink, !link.isEmpty, let url = URL(string: link) {
+                        Button("立即更新") {
+                            openURL(url)
+                        }
+                    }
                 } message: {
                     Text(noticeText)
                 }
@@ -39,6 +46,8 @@ struct LiquidGlassApp: App {
                 .joined(separator: "\n\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
+            // 取第一条带链接的公告作为"立即更新"跳转地址
+            noticeLink = remote.announcements.first(where: { !($0.link ?? "").isEmpty })?.link
             noticeText = text
             showNotice = true
         } catch {

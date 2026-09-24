@@ -1088,6 +1088,7 @@ struct Announcement: Codable, Identifiable {
     var title: String
     var content: String
     var time: String
+    var link: String?
 }
 
 struct RemoteData: Codable {
