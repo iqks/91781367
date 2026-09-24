@@ -209,12 +209,6 @@ struct ToggleView: View {
                         Label("自动更新", systemImage: "arrow.triangle.2.circlepath")
                     }
                 }
-                if #available(iOS 17.0, *) {
-                    Section("复选框样式（iOS 17+）") {
-                        Toggle("勾选框", isOn: $green)
-                            .toggleStyle(.checkbox)
-                    }
-                }
             }
             .navigationTitle("原生开关")
         }
@@ -548,10 +542,10 @@ struct GaugeView: View {
     var body: some View {
         List {
             Section("线性仪表") {
-                Gauge(value: $progress) {
+                Gauge(value: $progress, in: 0...1) {
                     Text("电量")
                 }
-                Gauge(value: $progress) {
+                Gauge(value: $progress, in: 0...1) {
                     Text("速度")
                 }
                 .gaugeStyle(.linearCapacity)
@@ -559,10 +553,10 @@ struct GaugeView: View {
             }
             Section("圆形仪表") {
                 HStack(spacing: 30) {
-                    Gauge(value: $progress) { }
+                    Gauge(value: $progress, in: 0...1) { }
                         .gaugeStyle(.accessoryCircular)
                         .tint(.green)
-                    Gauge(value: $progress) { }
+                    Gauge(value: $progress, in: 0...1) { }
                         .gaugeStyle(.accessoryCircularCapacity)
                         .tint(.orange)
                 }
