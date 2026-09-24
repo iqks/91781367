@@ -1,299 +1,232 @@
 import SwiftUI
 
 // ============================================================
-//  LiquidGlass 签名工具 —— SwiftUI 原生版
+//  苹果官方组件展示 App —— SwiftUI 原生版
 //
-//  · 底部导航栏：TabView（iOS 系统原生 TabBar）
-//  · 四个标签：应用 / 签名 / 文件 / 设置
-//  · 全部使用系统原生组件（List、Form、Toggle、Picker、
-//    ProgressView、Alert 等），iOS 26 自动呈现液态玻璃材质，
+//  · 底部导航栏：TabView（iOS 系统原生 TabBar，App Store 同款）
+//  · 多个页面，每页展示一种苹果官方原生组件：
+//    导航栏 / 按钮 / 滑动条 / 开关 / 输入框 / 更多组件
+//  · 全部使用系统原生组件，iOS 26 自动呈现液态玻璃材质，
 //    旧系统自动回退原生磨砂，无需任何判断代码
 // ============================================================
 
 struct ContentView: View {
     var body: some View {
         TabView {
-            AppsView()
-                .tabItem { Label("应用", systemImage: "app") }
-            SignView()
-                .tabItem { Label("签名", systemImage: "signature") }
-            FilesView()
-                .tabItem { Label("文件", systemImage: "folder") }
-            SettingsView()
-                .tabItem { Label("设置", systemImage: "gearshape") }
+            TabBarView()
+                .tabItem { Label("导航栏", systemImage: "rectangle.bottomthird.inset.filled") }
+            ButtonView()
+                .tabItem { Label("按钮", systemImage: "button.programmable") }
+            SliderView()
+                .tabItem { Label("滑动条", systemImage: "slider.horizontal.3") }
+            ToggleView()
+                .tabItem { Label("开关", systemImage: "switch.2") }
+            TextFieldView()
+                .tabItem { Label("输入框", systemImage: "text.cursor") }
+            MoreView()
+                .tabItem { Label("更多", systemImage: "square.grid.2x2") }
         }
     }
 }
 
-// MARK: - 应用页
+// MARK: - 页面 1：底部导航栏（当前页就是官方 TabBar 本身）
 
-struct AppsView: View {
+struct TabBarView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("我的应用") {
-                    AppRow(
-                        icon: "sparkles",
-                        color: .blue,
-                        name: "LiquidGlass App",
-                        desc: "v1.0.0 · com.example.liquidglass",
-                        badge: "已签名",
-                        badgeColor: .green
-                    )
-                    AppRow(
-                        icon: "gamecontroller.fill",
-                        color: .yellow,
-                        name: "示例游戏",
-                        desc: "v2.3.1 · 7 天有效期",
-                        badge: "待续签",
-                        badgeColor: .orange
-                    )
-                    AppRow(
-                        icon: "hammer.fill",
-                        color: .cyan,
-                        name: "示例工具",
-                        desc: "v1.2.0 · 未安装",
-                        badge: nil,
-                        badgeColor: nil
-                    )
-                }
-                Section("签名历史") {
-                    HistoryRow(desc: "2026-09-22 14:32 · LiquidGlass App 签名成功", ok: true)
-                    HistoryRow(desc: "2026-09-20 09:15 · 示例游戏 签名失败", ok: false)
+                Section {
+                    Label("这就是苹果官方底部导航栏（TabView / UITabBar）", systemImage: "rectangle.bottomthird.inset.filled")
+                    Label("iOS 26 自动启用液态玻璃材质", systemImage: "drop.fill")
+                    Label("旧系统自动回退原生磨砂", systemImage: "circle.lefthalf.filled")
+                    Label("点击下方标签即可切换页面", systemImage: "hand.tap")
                 }
                 if #available(iOS 26.0, *) {
                     Section("液态玻璃演示") {
-                        Label("iOS 26 系统原生液态玻璃材质", systemImage: "drop.fill")
+                        Label("iOS 26 真机上的液态玻璃", systemImage: "sparkles")
                             .padding()
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .glassEffect()
                     }
                 }
             }
-            .navigationTitle("应用")
+            .navigationTitle("底部导航栏")
         }
     }
 }
 
-struct AppRow: View {
-    let icon: String
-    let color: Color
-    let name: String
-    let desc: String
-    let badge: String?
-    let badgeColor: Color?
+// MARK: - 页面 2：苹果原生按钮
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(.white)
-                .frame(width: 40, height: 40)
-                .background(
-                    LinearGradient(colors: [color.opacity(0.7), color.opacity(0.4)],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: RoundedRectangle(cornerRadius: 10)
-                )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(.body)
-                Text(desc).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let badge, let badgeColor {
-                Text(badge)
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(badgeColor.opacity(0.18), in: Capsule())
-                    .foregroundStyle(badgeColor)
-            }
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-struct HistoryRow: View {
-    let desc: String
-    let ok: Bool
-
-    var body: some View {
-        HStack {
-            Text(desc).font(.subheadline)
-            Spacer()
-            Text(ok ? "成功" : "失败")
-                .font(.caption.bold())
-                .foregroundStyle(ok ? .green : .orange)
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-// MARK: - 签名页
-
-struct SignView: View {
-    @State private var cert = "Apple ID 自签（免费 · 7 天）"
-    @State private var appName = "LiquidGlass App"
-    @State private var bundleID = "com.example.liquidglass"
-    @State private var version = "1.0.0 (1)"
-    @State private var antiDebug = true
-    @State private var injectPlugin = false
-    @State private var progress: Double = 0
-    @State private var signing = false
-    @State private var showSuccess = false
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("证书") {
-                    RowPicker(label: "签名证书", value: cert)
-                    RowPicker(label: "描述文件", value: "自动选择")
-                }
-                Section("应用信息") {
-                    TextField("应用名称", text: $appName)
-                    TextField("Bundle ID", text: $bundleID)
-                        .keyboardType(.asciiCapable)
-                        .autocorrectionDisabled()
-                    TextField("版本号", text: $version)
-                }
-                Section("签名选项") {
-                    Toggle("启用反调试", isOn: $antiDebug)
-                    Toggle("注入插件", isOn: $injectPlugin)
-                }
-                Section {
-                    Button {
-                        startSign()
-                    } label: {
-                        Text("开始签名")
-                            .frame(maxWidth: .infinity)
-                            .fontWeight(.semibold)
-                    }
-                    .disabled(signing)
-
-                    if signing {
-                        ProgressView(value: progress)
-                            .progressViewStyle(.linear)
-                        Text("正在签名 \(Int(progress * 100))%")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .navigationTitle("签名")
-            .alert("签名成功", isPresented: $showSuccess) {
-                Button("完成", role: .cancel) {}
-            } message: {
-                Text("LiquidGlass App 已签名完成\n有效期 7 天 · 可立即安装")
-            }
-        }
-    }
-
-    private func startSign() {
-        signing = true
-        progress = 0
-        // 模拟签名进度（真实签名逻辑需在真机环境下处理证书与 Mach-O 重签名）
-        Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { timer in
-            progress += Double.random(in: 0.04...0.12)
-            if progress >= 1.0 {
-                progress = 1.0
-                timer.invalidate()
-                signing = false
-                showSuccess = true
-            }
-        }
-    }
-}
-
-struct RowPicker: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(label)
-            Spacer()
-            Text(value)
-                .foregroundStyle(.secondary)
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-    }
-}
-
-// MARK: - 文件页
-
-struct FilesView: View {
+struct ButtonView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("IPA 文件") {
-                    FileRow(icon: "doc.zipper", color: .orange, name: "LiquidGlassApp.ipa", desc: "21 KB · 刚刚")
-                    FileRow(icon: "doc.zipper", color: .green, name: "ExampleGame.ipa", desc: "88 MB · 昨天")
-                    FileRow(icon: "doc.zipper", color: .purple, name: "ToolBox.ipa", desc: "12 MB · 3 天前")
+                Section("默认按钮") {
+                    Button("普通按钮") {}
+                    Button {} label: {
+                        Label("分享按钮", systemImage: "square.and.arrow.up")
+                    }
+                }
+                Section("官方按钮样式") {
+                    Button("填充蓝色（Prominent）") {}
+                        .buttonStyle(.borderedProminent)
+                    Button("描边样式（Bordered）") {}
+                        .buttonStyle(.bordered)
+                    Button("灰色胶囊") {}
+                        .buttonStyle(.borderedProminent)
+                        .tint(.gray)
+                        .clipShape(Capsule())
+                    Button("红色危险操作", role: .destructive) {}
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                    Button("绿色确认") {}
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                }
+                Section("大按钮") {
+                    Button("全宽蓝色大按钮") {}
+                        .buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity)
                 }
             }
-            .navigationTitle("文件")
+            .navigationTitle("原生按钮")
         }
     }
 }
 
-struct FileRow: View {
-    let icon: String
-    let color: Color
-    let name: String
-    let desc: String
+// MARK: - 页面 3：苹果原生滑动条
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(.white)
-                .frame(width: 40, height: 40)
-                .background(color.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(.body)
-                Text(desc).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-// MARK: - 设置页
-
-struct SettingsView: View {
-    @State private var autoRenew = true
-    @State private var darkMode = true
+struct SliderView: View {
+    @State private var value = 0.5
+    @State private var stepValue = 3.0
+    @State private var minValue = 0.0
+    @State private var maxValue = 100.0
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("通用") {
-                    Toggle("自动续签提醒", isOn: $autoRenew)
-                    Toggle("深色模式", isOn: $darkMode)
+            List {
+                Section("基本滑动条") {
+                    Slider(value: $value)
+                    Text("当前值：\(value, specifier: "%.2f")")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                Section("关于") {
-                    HStack {
-                        Text("版本")
-                        Spacer()
-                        Text("v1.0.0").foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("开源协议")
-                        Spacer()
-                        Text("仅供学习交流").foregroundStyle(.secondary)
-                    }
+                Section("蓝色滑动条（系统强调色）") {
+                    Slider(value: $value)
+                        .tint(.blue)
                 }
-                Section("Liquid Glass") {
-                    Label("iOS 26 自动启用液态玻璃 · 旧系统原生磨砂", systemImage: "drop")
-                        .font(.footnote)
+                Section("步进滑动条（每次 +1）") {
+                    Slider(value: $stepValue, in: 0...10, step: 1)
+                    Text("当前：\(Int(stepValue))")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Section("带范围滑动条（0 ~ 100）") {
+                    Slider(value: $minValue, in: 0...100)
+                    Text("当前：\(Int(minValue))%")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("设置")
+            .navigationTitle("原生滑动条")
+        }
+    }
+}
+
+// MARK: - 页面 4：苹果原生开关
+
+struct ToggleView: View {
+    @State private var wifi = true
+    @State private var bluetooth = false
+    @State private var airplane = false
+    @State private var green = true
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("系统开关") {
+                    Toggle("Wi-Fi", isOn: $wifi)
+                    Toggle("蓝牙", isOn: $bluetooth)
+                    Toggle("飞行模式", isOn: $airplane)
+                }
+                Section("自定义颜色开关") {
+                    Toggle("绿色开关", isOn: $green)
+                        .tint(.green)
+                }
+            }
+            .navigationTitle("原生开关")
+        }
+    }
+}
+
+// MARK: - 页面 5：苹果原生输入框
+
+struct TextFieldView: View {
+    @State private var name = ""
+    @State private var email = ""
+    @State private var password = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("输入框") {
+                    TextField("请输入名称", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("邮箱地址", text: $email)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.emailAddress)
+                        .autocorrectionDisabled()
+                }
+                Section("安全输入（密码）") {
+                    SecureField("请输入密码", text: $password)
+                        .textFieldStyle(.roundedBorder)
+                }
+                Section("当前输入内容") {
+                    Text("名称：\(name.isEmpty ? "（空）" : name)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text("邮箱：\(email.isEmpty ? "（空）" : email)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("原生输入框")
+        }
+    }
+}
+
+// MARK: - 页面 6：更多官方组件
+
+struct MoreView: View {
+    @State private var selection = 0
+    @State private var count = 1
+    @State private var date = Date()
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("选择器（Picker）") {
+                    Picker("选择颜色", selection: $selection) {
+                        Text("红色").tag(0)
+                        Text("绿色").tag(1)
+                        Text("蓝色").tag(2)
+                    }
+                }
+                Section("步进器（Stepper）") {
+                    Stepper("数量：\(count)", value: $count, in: 1...10)
+                }
+                Section("进度条（ProgressView）") {
+                    ProgressView(value: 0.7)
+                    Text("加载进度 70%")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Section("日期选择器（DatePicker）") {
+                    DatePicker("选择日期", selection: $date, displayedComponents: .date)
+                    DatePicker("选择时间", selection: $date, displayedComponents: .hourAndMinute)
+                }
+            }
+            .navigationTitle("更多组件")
         }
     }
 }
