@@ -250,6 +250,7 @@ struct AllComponentsView: View {
                     NavigationLink("弹窗与菜单 Alert/Menu", destination: DialogViewPage())
                     NavigationLink("搜索框 Searchable", destination: SearchableViewPage())
                     NavigationLink("手势交互 Gesture", destination: GestureViewPage())
+                    NavigationLink("悬浮按钮 FloatingButton", destination: FloatingButtonView())
                 }
             }
             .navigationTitle("组件大全")
@@ -1001,6 +1002,79 @@ struct GestureViewPage: View {
             }
         }
         .navigationTitle("手势交互")
+    }
+}
+
+// MARK: - 悬浮按钮（可拖拽，原生组件组合）
+
+struct FloatingButtonView: View {
+    @State private var position: CGPoint?
+    @State private var isDragging = false
+    @State private var tapCount = 0
+
+    @ViewBuilder
+    private var glassCircle: some View {
+        if #available(iOS 26.0, *) {
+            Circle()
+                .fill(.ultraThinMaterial)
+                .glassEffect()
+        } else {
+            Circle()
+                .fill(.regularMaterial)
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .top) {
+                List {
+                    Section("悬浮按钮（Floating Button）") {
+                        Label("半空中悬浮的圆形按钮", systemImage: "circle.circle")
+                        Label("按住按钮即可拖到屏幕任意位置", systemImage: "hand.draw")
+                        Label("松手后停在新位置", systemImage: "pin")
+                        Label("轻点按钮触发操作", systemImage: "hand.tap")
+                    }
+                    Section("操作记录") {
+                        Label("按钮点击次数：\(tapCount)", systemImage: "number")
+                    }
+                    Section("说明") {
+                        Label("使用官方 DragGesture 手势实现", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+                        Label("材质为系统原生磨砂，iOS 26 自动液态玻璃", systemImage: "drop.fill")
+                    }
+                }
+
+                Button(action: { tapCount += 1 }) {
+                    Image(systemName: "plus")
+                        .font(.title2.bold())
+                        .foregroundStyle(.white)
+                        .padding(22)
+                        .background(glassCircle)
+                        .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 1))
+                        .shadow(
+                            color: .black.opacity(isDragging ? 0.5 : 0.3),
+                            radius: isDragging ? 16 : 8,
+                            y: 6
+                        )
+                }
+                .scaleEffect(isDragging ? 1.15 : 1.0)
+                .position(position ?? CGPoint(x: geo.size.width - 70, y: geo.size.height - 140))
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 2)
+                        .onChanged { value in
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                position = value.location
+                            }
+                            isDragging = true
+                        }
+                        .onEnded { _ in
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                isDragging = false
+                            }
+                        }
+                )
+            }
+        }
+        .navigationTitle("悬浮按钮")
     }
 }
 
