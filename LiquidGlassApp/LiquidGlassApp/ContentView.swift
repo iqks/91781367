@@ -542,10 +542,10 @@ struct GaugeView: View {
     var body: some View {
         List {
             Section("线性仪表") {
-                Gauge(value: $progress, in: 0...1) {
+                Gauge(value: progress, in: 0...1) {
                     Text("电量")
                 }
-                Gauge(value: $progress, in: 0...1) {
+                Gauge(value: progress, in: 0...1) {
                     Text("速度")
                 }
                 .gaugeStyle(.linearCapacity)
@@ -553,10 +553,10 @@ struct GaugeView: View {
             }
             Section("圆形仪表") {
                 HStack(spacing: 30) {
-                    Gauge(value: $progress, in: 0...1) { }
+                    Gauge(value: progress, in: 0...1) { }
                         .gaugeStyle(.accessoryCircular)
                         .tint(.green)
-                    Gauge(value: $progress, in: 0...1) { }
+                    Gauge(value: progress, in: 0...1) { }
                         .gaugeStyle(.accessoryCircularCapacity)
                         .tint(.orange)
                 }
