@@ -1203,7 +1203,7 @@ struct RemoteContentView: View {
         loading = false
     }
 
-    /// 解析云小店网页文本格式（"公告" 文字 "放链接" 链接）
+    /// 解析云小店网页文本格式（"公告" / 公告文字 / "放链接"链接）
     func parseTextNotice(_ pageText: String) -> (text: String, link: String) {
         let lines = pageText.components(separatedBy: .newlines)
         var content = ""
@@ -1212,11 +1212,17 @@ struct RemoteContentView: View {
         for raw in lines {
             let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if line == "\"公告\"" { state = 1; continue }
-            if line == "\"放链接\"" { state = 2; continue }
+            if line.hasPrefix("\"放链接\"") {
+                state = 2
+                let rest = line.dropFirst("\"放链接\"".count)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: " \"\t"))
+                if !rest.isEmpty { link = rest }
+                continue
+            }
             if line.isEmpty { continue }
             let cleaned = line.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             if state == 1 { content = cleaned }
-            else if state == 2 { link = cleaned }
+            else if state == 2 && link.isEmpty { link = cleaned }
         }
         return (content, link)
     }

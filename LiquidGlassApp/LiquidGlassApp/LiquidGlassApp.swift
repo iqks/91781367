@@ -72,6 +72,10 @@ struct LiquidGlassApp: App {
     }
 
     /// 解析云小店网页文本格式的公告
+    /// 格式：
+    /// "公告"
+    /// "公告里的文字"
+    /// "放链接"https://xxx     ← 链接放在"放链接"标记同一行；若该行只有标记，则读下一行
     func parseTextNotice(_ pageText: String) {
         let lines = pageText.components(separatedBy: .newlines)
         var content = ""
@@ -80,12 +84,18 @@ struct LiquidGlassApp: App {
         for raw in lines {
             let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if line == "\"公告\"" { state = 1; continue }
-            if line == "\"放链接\"" { state = 2; continue }
+            if line.hasPrefix("\"放链接\"") {
+                state = 2
+                let rest = line.dropFirst("\"放链接\"".count)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: " \"\t"))
+                if !rest.isEmpty { link = rest }
+                continue
+            }
             if line.isEmpty { continue }
             let cleaned = line.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             if state == 1 {
                 content = cleaned
-            } else if state == 2 {
+            } else if state == 2 && link.isEmpty {
                 link = cleaned
             }
         }
