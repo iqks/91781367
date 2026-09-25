@@ -1101,7 +1101,7 @@ struct RemoteContentView: View {
     @State private var loading = true
     @State private var errorMsg: String?
     @State private var showConfig = false
-    @AppStorage("remoteURL") private var remoteURL = "https://iqks.github.io/91781367/notice.json"
+    @AppStorage("remoteURL") private var remoteURL = "https://store.eoty.cn/%E5%85%AC%E5%91%8A.txt/nOzHI_arx2Ne-wCE2R6P"
 
     var body: some View {
         List {
@@ -1246,14 +1246,14 @@ struct RemoteConfigView: View {
                         .textInputAutocapitalization(.never)
                 }
                 Section("怎么填") {
-                    Label("云小店/网页文本: 填页面链接，按 公告/放链接 格式解析", systemImage: "doc.text")
-                    Label("默认（GitHub 公告）: https://iqks.github.io/91781367/notice.json", systemImage: "cloud")
+                    Label("云小店/网页文本: 填页面链接，按 公告/文字/链接 解析", systemImage: "doc.text")
+                    Label("默认: 你的云小店公告链接", systemImage: "storefront")
                     Label("电脑本机测试: http://localhost:8088", systemImage: "desktopcomputer")
                     Label("iPhone 连同一 Wi-Fi: http://电脑IP:8088", systemImage: "wifi")
                 }
                 Section {
-                    Button("恢复默认地址（GitHub 公告）") {
-                        remoteURL = "https://iqks.github.io/91781367/notice.json"
+                    Button("恢复默认地址（云小店公告）") {
+                        remoteURL = "https://store.eoty.cn/%E5%85%AC%E5%91%8A.txt/nOzHI_arx2Ne-wCE2R6P"
                     }
                 }
             }
