@@ -1179,11 +1179,46 @@ struct RemoteContentView: View {
         }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            self.data = try JSONDecoder().decode(RemoteData.self, from: data)
+            if let remote = try? JSONDecoder().decode(RemoteData.self, from: data) {
+                self.data = remote
+            } else if let pageText = String(data: data, encoding: .utf8) {
+                // 云小店网页文本格式："公告" / 文字 / "放链接" / 链接
+                let notice = parseTextNotice(pageText)
+                self.data = RemoteData(
+                    app_name: "云小店公告",
+                    announcements: [
+                        Announcement(
+                            id: 1,
+                            title: "公告",
+                            content: notice.text,
+                            time: "",
+                            link: notice.link
+                        )
+                    ]
+                )
+            }
         } catch {
             errorMsg = "连接失败：\(error.localizedDescription)\n请确认：\n① 电脑上的后台已启动\n② 地址正确（电脑本机/局域网IP/飞鸽公网地址）"
         }
         loading = false
+    }
+
+    /// 解析云小店网页文本格式（"公告" 文字 "放链接" 链接）
+    func parseTextNotice(_ pageText: String) -> (text: String, link: String) {
+        let lines = pageText.components(separatedBy: .newlines)
+        var content = ""
+        var link = ""
+        var state = 0
+        for raw in lines {
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line == "\"公告\"" { state = 1; continue }
+            if line == "\"放链接\"" { state = 2; continue }
+            if line.isEmpty { continue }
+            let cleaned = line.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            if state == 1 { content = cleaned }
+            else if state == 2 { link = cleaned }
+        }
+        return (content, link)
     }
 }
 
@@ -1201,10 +1236,10 @@ struct RemoteConfigView: View {
                         .textInputAutocapitalization(.never)
                 }
                 Section("怎么填") {
-                    Label("默认（推荐）: GitHub 托管公告，WiFi/4G 都能连", systemImage: "cloud")
+                    Label("云小店/网页文本: 填页面链接，按 公告/放链接 格式解析", systemImage: "doc.text")
+                    Label("默认（GitHub 公告）: https://iqks.github.io/91781367/notice.json", systemImage: "cloud")
                     Label("电脑本机测试: http://localhost:8088", systemImage: "desktopcomputer")
                     Label("iPhone 连同一 Wi-Fi: http://电脑IP:8088", systemImage: "wifi")
-                    Label("外网（飞鸽穿透）: http://xxxx.fgnb.top", systemImage: "globe")
                 }
                 Section {
                     Button("恢复默认地址（GitHub 公告）") {
