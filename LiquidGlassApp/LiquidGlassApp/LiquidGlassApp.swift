@@ -72,34 +72,35 @@ struct LiquidGlassApp: App {
     }
 
     /// 解析云小店网页文本格式的公告
-    /// 格式：
-    /// "公告"
-    /// "公告里的文字"
-    /// "放链接"https://xxx     ← 链接放在"放链接"标记同一行；若该行只有标记，则读下一行
+    /// 支持两种写法：
+    /// 1) "公告" "公告里的文字" "https://链接"
+    /// 2) "公告" / "公告里的文字" / "放链接"https://链接
     func parseTextNotice(_ pageText: String) {
-        let lines = pageText.components(separatedBy: .newlines)
-        var content = ""
-        var link = ""
-        var state = 0 // 0=等待"公告" 1=读取公告文字 2=读取放链接
-        for raw in lines {
-            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line == "\"公告\"" { state = 1; continue }
-            if line.hasPrefix("\"放链接\"") {
-                state = 2
-                let rest = line.dropFirst("\"放链接\"".count)
-                    .trimmingCharacters(in: CharacterSet(charactersIn: " \"\t"))
-                if !rest.isEmpty { link = rest }
-                continue
-            }
-            if line.isEmpty { continue }
-            let cleaned = line.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            if state == 1 {
-                content = cleaned
-            } else if state == 2 && link.isEmpty {
-                link = cleaned
+        var quotes: [String] = []
+        if let regex = try? NSRegularExpression(pattern: "\"([^\"]*)\"") {
+            let ns = pageText as NSString
+            let results = regex.matches(in: pageText, range: NSRange(location: 0, length: ns.length))
+            for m in results {
+                let r = m.range(at: 1)
+                if r.location != NSNotFound { quotes.append(ns.substring(with: r)) }
             }
         }
-        noticeText = content
+        // 找到 "公告" 标记
+        guard let idx = quotes.firstIndex(of: "公告") else { return }
+        var text = ""
+        var link = ""
+        for q in quotes[(idx + 1)...] where q != "放链接" {
+            if text.isEmpty { text = q } else { link = q; break }
+        }
+        // 兜底：如果"放链接"标记同一行后面直接跟了链接（引号外）
+        if link.isEmpty, let range = pageText.range(of: "\"放链接\"") {
+            var rest = Substring(pageText[range.upperBound...])
+            rest = rest.drop(while: { $0 == " " || $0 == "\"" || $0 == "\t" })
+            let candidate = rest.prefix(while: { !$0.isNewline && $0 != " " && $0 != "\"" })
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !candidate.isEmpty { link = candidate }
+        }
+        noticeText = text
         noticeLink = link.isEmpty ? nil : link
     }
 }
