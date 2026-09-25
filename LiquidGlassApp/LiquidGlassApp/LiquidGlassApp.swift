@@ -31,7 +31,8 @@ struct LiquidGlassApp: App {
     func fetchAnnouncement() async {
         var urlString = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if urlString.hasSuffix("/") { urlString.removeLast() }
-        if !urlString.contains("/api/content") && !urlString.hasSuffix(".json") {
+        // 只有地址是"基础地址"（后面没有路径）时才自动拼 /api/content
+        if let u = URL(string: urlString), u.path.isEmpty || u.path == "/" {
             urlString += "/api/content"
         }
         guard let url = URL(string: urlString) else { return }
