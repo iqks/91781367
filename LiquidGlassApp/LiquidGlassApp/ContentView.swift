@@ -1767,6 +1767,9 @@ struct DownloadView: View {
     @State private var signMessage = ""
     @State private var showSignSheet = false
     @State private var signTarget: DownloadManager.DownloadItem?
+    @State private var showInstallPrompt = false   // 签名完成 → 自动弹安装确认
+    @State private var pendingInstallURL: URL?     // 待安装的已签名 IPA
+    @State private var pendingInstallName = ""
 
     var body: some View {
         content
@@ -1835,6 +1838,12 @@ struct DownloadView: View {
                     .interactiveDismissDisabled(true)
                     .onAppear { startActualSign() }
                 }
+            }
+            .alert("签名完成", isPresented: $showInstallPrompt) {
+                Button("立即安装") { installSignedIPA() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("已保存到「已签名」，是否立即安装？")
             }
             .alert("签名结果", isPresented: $showSignResult) {
                 Button("知道了", role: .cancel) {}
@@ -2040,8 +2049,9 @@ struct DownloadView: View {
                 let signed = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest)
                 downloader.signedItems.append(signed)
                 showSignSheet = false
-                signMessage = "签名成功！已添加到「已签名」"
-                showSignResult = true
+                pendingInstallURL = dest
+                pendingInstallName = name
+                showInstallPrompt = true           // 自动弹出安装确认框
                 filter = "已签名"
             } catch {
                 showSignSheet = false
@@ -2063,6 +2073,40 @@ struct DownloadView: View {
         try? FileManager.default.copyItem(at: url, to: dest)
         let item = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest)
         withAnimation { downloader.items.append(item) }
+    }
+
+    /// 签名完成：上传已签名 IPA 到服务器，弹出系统安装框（itms-services）
+    private func installSignedIPA() {
+        guard let url = pendingInstallURL else { return }
+        let name = pendingInstallName
+        signMessage = "正在上传并准备安装…"
+        showSignResult = true
+        Task {
+            do {
+                let data = try Data(contentsOf: url)
+                var req = URLRequest(url: URL(string: "https://ios.zhaisir.cn/upload_app")!)
+                req.httpMethod = "POST"
+                req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+                req.setValue(name, forHTTPHeaderField: "X-Filename")
+                req.timeoutInterval = 180
+                let (respData, _) = try await URLSession.shared.upload(for: req, from: data)
+                if let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
+                   let ok = obj["ok"] as? Bool, ok,
+                   let plist = obj["plist"] as? String,
+                   let enc = plist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                    let itms = "itms-services://?action=download-manifest&url=\(enc)"
+                    if let u = URL(string: itms) {
+                        UIApplication.shared.open(u, options: [:]) { _ in }
+                        return
+                    }
+                }
+                signMessage = "安装服务未响应，请到「已签名」用全能签安装"
+                showSignResult = true
+            } catch {
+                signMessage = "无法连接安装服务器，请到「已签名」用全能签安装"
+                showSignResult = true
+            }
+        }
     }
 
     /// 打开内置浏览器
@@ -2158,6 +2202,7 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
 
     private func waitReady(_ webView: WKWebView) async throws {
         // 最长等 60 秒，确保 JS 加载完成
+        var waited = 0
         for _ in 0..<300 {
             let ok: Bool = await withCheckedContinuation { c in
                 webView.evaluateJavaScript("typeof signIpaStart !== 'undefined'") { r, _ in
@@ -2167,6 +2212,10 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
             if ok {
                 logText = "签名核心已就绪"
                 return
+            }
+            waited += 1
+            if waited % 10 == 0 {
+                logText = "正在加载签名引擎…（\(waited * 2) 秒）"
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
