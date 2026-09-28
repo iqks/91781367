@@ -263,19 +263,13 @@ struct HomeView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             Spacer()
-                            // 获取按钮（加大版）
-                            Button {
+                            // 获取按钮（苹果原生标准大小，文字自动显示）
+                            Button("获取") {
                                 if let url = URL(string: appLink), !appLink.isEmpty {
                                     openURL(url)
                                 }
-                            } label: {
-                                Text("获取")
-                                    .font(.headline)
-                                    .padding(.horizontal, 22)
-                                    .padding(.vertical, 9)
                             }
                             .buttonStyle(.borderedProminent)
-                            .clipShape(Capsule())
                         }
                         .padding(.vertical, 10)
                         Divider()
