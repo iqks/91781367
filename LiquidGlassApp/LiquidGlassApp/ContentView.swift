@@ -2000,12 +2000,23 @@ struct SettingsView: View {
 
 /// 证书管理：内置证书，无需手动导入
 struct CertificateSettingsView: View {
+    private var certInstalled: Bool {
+        Bundle.main.url(forResource: "cert", withExtension: "p12") != nil
+    }
+    private var profileInstalled: Bool {
+        Bundle.main.url(forResource: "profile", withExtension: "mobileprovision") != nil
+    }
+
     var body: some View {
         Form {
             Section("内置证书") {
-                Label("已预装内置证书", systemImage: "checkmark.seal.fill")
-                    .foregroundStyle(.green)
-                Text("签名时自动使用，无需手动导入")
+                Label(certInstalled ? "已内置企业证书 (P12)" : "证书未找到",
+                      systemImage: certInstalled ? "checkmark.seal.fill" : "xmark.circle")
+                    .foregroundStyle(certInstalled ? .green : .red)
+                Label(profileInstalled ? "已内置签名描述文件" : "描述文件未找到",
+                      systemImage: profileInstalled ? "checkmark.circle.fill" : "xmark.circle")
+                    .foregroundStyle(profileInstalled ? .green : .red)
+                Text("北京西贝 企业证书，签名时自动使用，无需手动导入")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
