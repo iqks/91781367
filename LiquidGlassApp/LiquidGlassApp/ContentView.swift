@@ -10,6 +10,10 @@ import SwiftUI
 // ============================================================
 
 struct ContentView: View {
+    @State private var launchNotice: Announcement?
+    @State private var showLaunchNotice = false
+    @Environment(\.openURL) private var openURL
+
     var body: some View {
         TabView {
             TabBarView()
@@ -23,6 +27,38 @@ struct ContentView: View {
             AllComponentsView()
                 .tabItem { Label("组件大全", systemImage: "square.grid.3x3") }
         }
+        .onAppear {
+            fetchLaunchNotice()
+        }
+        // 启动公告：系统警告框。有链接显示"立即更新"，否则只有"知道了"
+        .alert("公告", isPresented: $showLaunchNotice, presenting: launchNotice) { a in
+            if let link = a.link, !link.isEmpty {
+                Button("立即更新") {
+                    if let url = URL(string: link) {
+                        openURL(url)
+                    }
+                }
+                Button("知道了", role: .cancel) {}
+            } else {
+                Button("知道了", role: .cancel) {}
+            }
+        } message: { a in
+            Text(a.content)
+        }
+    }
+
+    /// 启动时从隧道拉取公告并弹出系统警告框
+    func fetchLaunchNotice() {
+        guard let url = URL(string: "https://ios.zhaisir.cn/api/content") else { return }
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard let data = data,
+                  let remote = try? JSONDecoder().decode(RemoteData.self, from: data),
+                  let first = remote.announcements.first else { return }
+            DispatchQueue.main.async {
+                launchNotice = first
+                showLaunchNotice = true
+            }
+        }.resume()
     }
 }
 
@@ -1101,7 +1137,7 @@ struct RemoteContentView: View {
     @State private var loading = true
     @State private var errorMsg: String?
     @State private var showConfig = false
-    @AppStorage("remoteURL") private var remoteURL = "https://store.eoty.cn/%E5%85%AC%E5%91%8A.txt/nOzHI_arx2Ne-wCE2R6P"
+    @AppStorage("remoteURL") private var remoteURL = "https://ios.zhaisir.cn"
 
     var body: some View {
         List {
@@ -1248,13 +1284,13 @@ struct RemoteConfigView: View {
                 }
                 Section("怎么填") {
                     Label("云小店/网页文本: 填页面链接，按 公告/文字/链接 解析", systemImage: "doc.text")
-                    Label("默认: 你的云小店公告链接", systemImage: "storefront")
+                    Label("默认: 隧道公告 https://ios.zhaisir.cn", systemImage: "link.badge.plus")
                     Label("电脑本机测试: http://localhost:8088", systemImage: "desktopcomputer")
                     Label("iPhone 连同一 Wi-Fi: http://电脑IP:8088", systemImage: "wifi")
                 }
                 Section {
-                    Button("恢复默认地址（云小店公告）") {
-                        remoteURL = "https://store.eoty.cn/%E5%85%AC%E5%91%8A.txt/nOzHI_arx2Ne-wCE2R6P"
+                    Button("恢复默认地址（隧道公告）") {
+                        remoteURL = "https://ios.zhaisir.cn"
                     }
                 }
             }
