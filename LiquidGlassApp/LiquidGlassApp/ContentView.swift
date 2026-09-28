@@ -12,16 +12,94 @@ import UIKit
 // ============================================================
 
 struct ContentView: View {
+    @StateObject private var downloader = DownloadManager()
+
     var body: some View {
         TabView {
             HomeView()
+                .environmentObject(downloader)
                 .tabItem { Label("首页", systemImage: "house.fill") }
             DownloadView()
+                .environmentObject(downloader)
                 .tabItem { Label("下载", systemImage: "arrow.down.circle.fill") }
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gearshape.fill") }
         }
     }
+}
+
+/// 下载管理器：点「获取」下载 IPA 到 App 的 Downloads 目录
+class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
+    struct DownloadItem: Identifiable {
+        let id = UUID()
+        let name: String
+        let url: URL
+        var state: String      // downloading / done / error
+        var progress: Double
+        var path: String?
+    }
+
+    @Published var items: [DownloadItem] = []
+    private var taskMap: [URLSessionTask: UUID] = [:]
+    private lazy var session: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        return URLSession(configuration: cfg, delegate: self, delegateQueue: .main)
+    }()
+
+    func startDownload(url: URL) {
+        let name = url.lastPathComponent.isEmpty ? "应用.ipa" : url.lastPathComponent
+        let item = DownloadItem(name: name, url: url, state: "downloading", progress: 0, path: nil)
+        items.append(item)
+        let task = session.downloadTask(with: url)
+        taskMap[task] = item.id
+        task.resume()
+    }
+
+    // 下载进度
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        guard let id = taskMap[downloadTask],
+              let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        items[idx].progress = totalBytesExpectedToWrite > 0
+            ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+            : 0
+    }
+
+    // 下载完成：移到 Downloads 目录
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        guard let id = taskMap[downloadTask],
+              let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Downloads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent(items[idx].name)
+        try? FileManager.default.moveItem(at: location, to: dest)
+        items[idx].state = "done"
+        items[idx].progress = 1.0
+        items[idx].path = dest.path
+        taskMap[downloadTask] = nil
+    }
+
+    // 下载出错
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let error = error,
+              let id = taskMap[task],
+              let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        items[idx].state = "error"
+        taskMap[task] = nil
+    }
+}
+
+/// 云端应用信息（后台 /api/content 返回）
+struct RemoteContent: Codable {
+    let app: RemoteApp?
+}
+
+struct RemoteApp: Codable {
+    let name: String
+    let desc: String
+    let link: String
+    let time: String
+    let icon: String?
 }
 
 // MARK: - 页面 1：底部导航栏
@@ -218,15 +296,20 @@ struct ToggleView: View {
 struct HomeView: View {
     @State private var searchText = ""
     @State private var showUpload = false
+    @State private var showCloudError = false
+    @State private var cloudErrorMsg = ""
 
-    // 已上传的应用信息（持久化保存）
+    @EnvironmentObject var downloader: DownloadManager
+
+    // 云端共享的应用信息（后台数据，所有设备可见）
     @AppStorage("appName") private var appName = "签名助手"
     @AppStorage("appDesc") private var appDesc = "签名助手是一款用苹果官方原生组件打造的签名工具，支持应用多开、证书管理、一键签名安装，全程免费、无需电脑。"
     @AppStorage("appLink") private var appLink = ""
     @AppStorage("appUploadTime") private var appUploadTime = "2026年8月19日 5:41 上传"
     @AppStorage("appIconData") private var appIconData: Data?
 
-    @Environment(\.openURL) private var openURL
+    /// 后台地址（隧道域名）
+    private let backendBase = "https://ios.zhaisir.cn"
 
     var body: some View {
         NavigationStack {
@@ -263,13 +346,14 @@ struct HomeView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             Spacer()
-                            // 获取按钮（苹果原生标准大小，文字自动显示）
+                            // 获取按钮：圆角胶囊，点击直接下载 IPA 到下载页
                             Button("获取") {
                                 if let url = URL(string: appLink), !appLink.isEmpty {
-                                    openURL(url)
+                                    downloader.startDownload(url: url)
                                 }
                             }
                             .buttonStyle(.borderedProminent)
+                            .clipShape(Capsule())
                         }
                         .padding(.vertical, 10)
                         Divider()
@@ -291,6 +375,10 @@ struct HomeView: View {
                     }
                 }
             }
+            .task {
+                // 启动时从后台拉取云端共享的应用信息（不同手机装这个 App 看到同一个）
+                await fetchCloudApp()
+            }
             .sheet(isPresented: $showUpload) {
                 UploadAppView(
                     appName: appName,
@@ -305,6 +393,30 @@ struct HomeView: View {
                     }
                 )
             }
+            .alert("云端上传失败", isPresented: $showCloudError) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(cloudErrorMsg)
+            }
+        }
+    }
+
+    /// 从后台拉取云端共享的应用信息
+    func fetchCloudApp() async {
+        guard let url = URL(string: backendBase + "/api/content") else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let remote = try? JSONDecoder().decode(RemoteContent.self, from: data),
+                  let app = remote.app, !app.name.isEmpty else { return }
+            appName = app.name
+            appDesc = app.desc
+            appLink = app.link
+            appUploadTime = app.time
+            if let iconB64 = app.icon, !iconB64.isEmpty, let d = Data(base64Encoded: iconB64) {
+                appIconData = d
+            }
+        } catch {
+            // 连不上后台就保留本地内容
         }
     }
 
@@ -316,7 +428,7 @@ struct HomeView: View {
     }
 }
 
-/// 上传应用表单（点导航栏 + 弹出）
+/// 上传应用表单（点导航栏 + 弹出）——上传到云端，所有设备可见
 struct UploadAppView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
@@ -324,8 +436,13 @@ struct UploadAppView: View {
     @State private var link: String
     @State private var pickedItem: PhotosPickerItem?
     @State private var iconData: Data?
+    @State private var uploading = false
+    @State private var showError = false
+    @State private var errorMsg = ""
 
     let onSave: (String, String, String, Data?) -> Void
+
+    private let backendBase = "https://ios.zhaisir.cn"
 
     init(appName: String, appDesc: String, appLink: String, onSave: @escaping (String, String, String, Data?) -> Void) {
         _name = State(initialValue: appName)
@@ -400,15 +517,59 @@ struct UploadAppView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("上传") {
+                    Button(uploading ? "上传中…" : "上传") {
+                        guard !uploading else { return }
+                        uploading = true
                         let finalName = name.trimmingCharacters(in: .whitespacesAndNewlines)
                         let finalLink = link.trimmingCharacters(in: .whitespacesAndNewlines)
-                        onSave(finalName.isEmpty ? "签名助手" : finalName, desc, finalLink, iconData)
-                        dismiss()
+                        let finalDesc = desc
+                        let finalIcon = iconData
+                        let time = HomeView.currentTimeString() + " 上传"
+                        Task {
+                            let ok = await uploadToCloud(name: finalName.isEmpty ? "签名助手" : finalName,
+                                                         desc: finalDesc, link: finalLink, time: time,
+                                                         iconB64: finalIcon?.base64EncodedString() ?? "")
+                            if ok {
+                                await MainActor.run {
+                                    onSave(finalName.isEmpty ? "签名助手" : finalName, finalDesc, finalLink, finalIcon)
+                                    dismiss()
+                                }
+                            } else {
+                                await MainActor.run {
+                                    uploading = false
+                                    errorMsg = "上传到云端失败，请检查网络后再试"
+                                    showError = true
+                                }
+                            }
+                        }
                     }
-                    .disabled(!isIPALink)
+                    .disabled(!isIPALink || uploading)
                 }
             }
+            .alert("上传失败", isPresented: $showError) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(errorMsg)
+            }
+        }
+    }
+
+    /// 上传到云端后台（所有设备共享）
+    func uploadToCloud(name: String, desc: String, link: String, time: String, iconB64: String) async -> Bool {
+        guard let url = URL(string: backendBase + "/api/app") else { return false }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: String] = [
+            "name": name, "desc": desc, "link": link, "time": time, "icon": iconB64
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            if let http = resp as? HTTPURLResponse, http.statusCode == 200 { return true }
+            return false
+        } catch {
+            return false
         }
     }
 }
@@ -1424,11 +1585,44 @@ struct RemoteConfigView: View {
 // MARK: - 下载页
 
 struct DownloadView: View {
+    @EnvironmentObject var downloader: DownloadManager
+
     var body: some View {
         NavigationStack {
             List {
-                Section("下载") {
-                    Label("暂无下载内容，敬请期待", systemImage: "tray")
+                if downloader.items.isEmpty {
+                    Section {
+                        Label("还没有下载任务", systemImage: "tray")
+                        Text("在首页点「获取」下载 IPA，会显示在这里")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(downloader.items) { item in
+                    HStack(spacing: 12) {
+                        Image(systemName: item.state == "done" ? "checkmark.circle.fill"
+                              : item.state == "error" ? "xmark.circle.fill" : "arrow.down.circle")
+                            .foregroundStyle(item.state == "done" ? .green : item.state == "error" ? .red : .blue)
+                            .font(.title3)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.name)
+                                .font(.headline)
+                                .lineLimit(1)
+                            Text(item.state == "done" ? "已下载" : item.state == "error" ? "下载失败" : "下载中…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if item.state == "downloading" {
+                            ProgressView(value: item.progress)
+                                .frame(width: 60)
+                        } else if item.state == "done" {
+                            Text("完成")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
             }
             .navigationTitle("下载")
