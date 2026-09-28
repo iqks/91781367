@@ -2058,7 +2058,7 @@ struct WebBrowserView: UIViewRepresentable {
 }
 
 // MARK: - 签名引擎（内置 WebView 运行 zsign-wasm 真签名）
-class SignEngine: NSObject, WKScriptMessageHandler {
+class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
     private var webView: WKWebView?
     private var ready = false
     private var pendingContinuation: CheckedContinuation<Data, Error>?
