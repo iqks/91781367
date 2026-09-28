@@ -1687,7 +1687,7 @@ struct RemoteConfigView: View {
 struct DownloadView: View {
     @EnvironmentObject var downloader: DownloadManager
     @State private var filter = "文件"
-    @State private var actionItem: DownloadItem?
+    @State private var actionItem: DownloadManager.DownloadItem?
     @State private var showActions = false
     @State private var showShare = false
     @State private var shareURL: URL?
@@ -1762,9 +1762,8 @@ struct DownloadView: View {
             }
             ForEach(downloader.items) { item in
                 HStack(spacing: 12) {
-                    Image(systemName: item.state == "done" ? "checkmark.circle.fill"
-                          : item.state == "error" ? "xmark.circle.fill" : "arrow.down.circle")
-                        .foregroundStyle(item.state == "done" ? .green : item.state == "error" ? .red : .blue)
+                    Image(systemName: iconName(for: item.state))
+                        .foregroundStyle(iconColor(for: item.state))
                         .font(.title3)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(item.name)
@@ -1808,12 +1807,24 @@ struct DownloadView: View {
         }
     }
 
-    private func presentActions(for item: DownloadItem) {
+    private func presentActions(for item: DownloadManager.DownloadItem) {
         actionItem = item
         showActions = true
     }
 
-    private func deleteItem(_ item: DownloadItem) {
+    private func iconName(for state: String) -> String {
+        if state == "done" { return "checkmark.circle.fill" }
+        if state == "error" { return "xmark.circle.fill" }
+        return "arrow.down.circle"
+    }
+
+    private func iconColor(for state: String) -> Color {
+        if state == "done" { return .green }
+        if state == "error" { return .red }
+        return .blue
+    }
+
+    private func deleteItem(_ item: DownloadManager.DownloadItem) {
         withAnimation {
             downloader.items.removeAll { $0.id == item.id }
         }
