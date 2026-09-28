@@ -47,7 +47,7 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
         let url: URL
         var state: String      // downloading / done / error
         var progress: Double
-        var path: String?
+        var path: URL?
     }
 
     @Published var items: [DownloadItem] = []
@@ -88,7 +88,7 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
         try? FileManager.default.moveItem(at: location, to: dest)
         items[idx].state = "done"
         items[idx].progress = 1.0
-        items[idx].path = dest.path
+        items[idx].path = dest
         taskMap[downloadTask] = nil
         // 下载完成：自动跳转到下载页
         shouldJumpToDownload = true
