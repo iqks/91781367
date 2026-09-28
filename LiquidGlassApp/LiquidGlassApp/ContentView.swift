@@ -55,6 +55,7 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     }
 
     @Published var items: [DownloadItem] = []
+    @Published var signedItems: [DownloadItem] = []
     @Published var shouldJumpToDownload = false   // 下载完成 → 跳下载页
     @Published var shouldRemoveCard = false       // 下载失败（链接失效）→ 删除卡片
     private var taskMap: [URLSessionTask: UUID] = [:]
@@ -1712,11 +1713,15 @@ struct DownloadView: View {
     @State private var inputURL = ""
     @State private var showBrowser = false
     @State private var browserURL: URL?
+    @StateObject private var signEngine = SignEngine()
+    @State private var showSigning = false
+    @State private var showSignResult = false
+    @State private var signMessage = ""
 
     var body: some View {
         content
             .confirmationDialog("选择操作", isPresented: $showActions, titleVisibility: .visible) {
-                Button("签名") { showSignAlert = true }
+                Button("签名") { startSigning(actionItem) }
                 Button("提取应用库") {
                     if let url = actionItem?.path { activeSheet = .export(url) }
                 }
@@ -1758,6 +1763,26 @@ struct DownloadView: View {
                         downloader.startDownload(url: dl)
                     }
                 }
+            }
+            .overlay {
+                if showSigning {
+                    ZStack {
+                        Color.black.opacity(0.4).ignoresSafeArea()
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .controlSize(.large)
+                            Text("正在签名，请稍候…")
+                                .font(.headline)
+                        }
+                        .padding(28)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemBackground)))
+                    }
+                }
+            }
+            .alert("签名结果", isPresented: $showSignResult) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(signMessage)
             }
     }
 
@@ -1857,12 +1882,43 @@ struct DownloadView: View {
 
     /// 已签名列表：签名后的 IPA
     private var signedList: some View {
-        List {
-            Section {
-                Label("暂无已签名应用", systemImage: "checkmark.seal")
-                Text("下载的 IPA 签名后会显示在这里")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        Group {
+            if downloader.signedItems.isEmpty {
+                List {
+                    Section {
+                        Label("暂无已签名应用", systemImage: "checkmark.seal")
+                        Text("下载的 IPA 签名后会显示在这里")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                List {
+                    ForEach(downloader.signedItems) { item in
+                        HStack {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
+                            VStack(alignment: .leading) {
+                                Text(item.name)
+                                    .font(.body)
+                                Text("已签名")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button {
+                                deleteItem(item)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { presentActions(for: item) }
+                        .padding(.vertical, 4)
+                    }
+                }
             }
         }
     }
@@ -1887,6 +1943,41 @@ struct DownloadView: View {
     private func deleteItem(_ item: DownloadManager.DownloadItem) {
         withAnimation {
             downloader.items.removeAll { $0.id == item.id }
+            downloader.signedItems.removeAll { $0.id == item.id }
+        }
+    }
+
+    /// 用内置证书对 IPA 签名
+    private func startSigning(_ item: DownloadManager.DownloadItem?) {
+        guard let item = item, let path = item.path else { return }
+        guard let p12 = Bundle.main.url(forResource: "cert", withExtension: "p12"),
+              let prov = Bundle.main.url(forResource: "profile", withExtension: "mobileprovision") else {
+            signMessage = "内置证书未找到，请重新安装 App"
+            showSignResult = true
+            return
+        }
+        showSigning = true
+        signEngine.ensureLoaded()
+        Task {
+            do {
+                let data = try await signEngine.sign(ipaURL: path, p12URL: p12, provURL: prov, password: "iosxb.cn")
+                let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("Signed", isDirectory: true)
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let name = (item.name as NSString).deletingPathExtension + "_已签名.ipa"
+                let dest = dir.appendingPathComponent(name)
+                try data.write(to: dest)
+                let signed = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest)
+                downloader.signedItems.append(signed)
+                showSigning = false
+                signMessage = "签名成功！已添加到「已签名」"
+                showSignResult = true
+                filter = "已签名"
+            } catch {
+                showSigning = false
+                signMessage = "签名失败：\(error.localizedDescription)"
+                showSignResult = true
+            }
         }
     }
 
@@ -1962,6 +2053,71 @@ struct WebBrowserView: UIViewRepresentable {
                 }
             }
             decisionHandler(.allow)
+        }
+    }
+}
+
+// MARK: - 签名引擎（内置 WebView 运行 zsign-wasm 真签名）
+class SignEngine: NSObject, WKScriptMessageHandler {
+    private var webView: WKWebView?
+    private var ready = false
+    private var pendingContinuation: CheckedContinuation<Data, Error>?
+
+    func ensureLoaded() {
+        guard webView == nil else { return }
+        let config = WKWebViewConfiguration()
+        config.setValue(true, forKey: "allowFileAccessFromFileURLs")
+        config.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
+        config.userContentController.add(self, name: "signResult")
+        let wv = WKWebView(frame: .zero, configuration: config)
+        webView = wv
+        if let url = Bundle.main.url(forResource: "sign", withExtension: "html", subdirectory: "WebSign") {
+            wv.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        }
+    }
+
+    func sign(ipaURL: URL, p12URL: URL, provURL: URL, password: String) async throws -> Data {
+        ensureLoaded()
+        try await waitReady()
+        let ipaB64 = try Data(contentsOf: ipaURL).base64EncodedString()
+        let p12B64 = try Data(contentsOf: p12URL).base64EncodedString()
+        let provB64 = try Data(contentsOf: provURL).base64EncodedString()
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
+            pendingContinuation = cont
+            let js = "signIpaStart('\(ipaB64)', '\(p12B64)', '\(provB64)', '\(password)')"
+            webView?.evaluateJavaScript(js) { _, err in
+                if let err = err {
+                    cont.resume(throwing: err)
+                    self.pendingContinuation = nil
+                }
+            }
+        }
+    }
+
+    private func waitReady() async throws {
+        for _ in 0..<100 {
+            let ok: Bool = await withCheckedContinuation { c in
+                webView?.evaluateJavaScript("typeof signIpaStart !== 'undefined'") { r, _ in
+                    c.resume(returning: (r as? Bool) ?? false)
+                }
+            }
+            if ok { ready = true; return }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        throw NSError(domain: "SignEngine", code: -2, userInfo: [NSLocalizedDescriptionKey: "签名引擎加载超时"])
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "signResult",
+              let body = message.body as? [String: Any],
+              let status = body["status"] as? String else { return }
+        if status == "success", let payload = body["payload"] as? String, let data = Data(base64Encoded: payload) {
+            pendingContinuation?.resume(returning: data)
+            pendingContinuation = nil
+        } else if status == "error" {
+            let msg = body["payload"] as? String ?? "签名失败"
+            pendingContinuation?.resume(throwing: NSError(domain: "SignEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: msg]))
+            pendingContinuation = nil
         }
     }
 }
