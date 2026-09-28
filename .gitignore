@@ -44,3 +44,4 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 LiquidGlassApp/LiquidGlassApp/WebSign/test_sign.html
+LiquidGlassApp/LiquidGlassApp/WebSign/inject_test.html

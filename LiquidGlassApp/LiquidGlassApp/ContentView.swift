@@ -2181,7 +2181,8 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
         guard let webView = webView else {
             throw NSError(domain: "SignEngine", code: -3, userInfo: [NSLocalizedDescriptionKey: "签名页面未就绪，请重试"])
         }
-        try await waitReady(webView)          // 等 HTML/JS 加载完
+        try await waitReady(webView)          // 等最小页面就绪
+        try await injectJS(webView)           // 注入全部 JS 代码（分块）
         try await injectWasm(webView)         // 注入签名核心（分块）
         logText = "正在读取 IPA 文件…"
         let ipaB64 = try Data(contentsOf: ipaURL).base64EncodedString()
@@ -2201,25 +2202,72 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
     }
 
     private func waitReady(_ webView: WKWebView) async throws {
-        // 最长等 60 秒，确保 JS 加载完成
+        // 等待最小页面加载完成（window 存在即视为就绪）
         var waited = 0
-        for _ in 0..<300 {
+        for _ in 0..<150 {
             let ok: Bool = await withCheckedContinuation { c in
-                webView.evaluateJavaScript("typeof signIpaStart !== 'undefined'") { r, _ in
+                webView.evaluateJavaScript("typeof window !== 'undefined'") { r, _ in
                     c.resume(returning: (r as? Bool) ?? false)
                 }
             }
             if ok {
-                logText = "签名核心已就绪"
                 return
             }
             waited += 1
             if waited % 10 == 0 {
-                logText = "正在加载签名引擎…（\(waited * 2) 秒）"
+                logText = "正在初始化签名页面…（\(waited * 2) 秒）"
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
-        throw NSError(domain: "SignEngine", code: -2, userInfo: [NSLocalizedDescriptionKey: "签名引擎加载超时（JS 未响应）"])
+        throw NSError(domain: "SignEngine", code: -2, userInfo: [NSLocalizedDescriptionKey: "签名页面初始化超时"])
+    }
+
+    /// 分块注入 JS 代码（jszip + zsign + sign），完全绕开大 HTML 加载
+    private func injectJS(_ webView: WKWebView) async throws {
+        let dir = "WebSign"
+        let names = ["jszip.min.js", "zsign-wasm.js", "sign.js"]
+        var code = ""
+        for nm in names {
+            let base = (nm as NSString).deletingPathExtension
+            let ext = (nm as NSString).pathExtension
+            guard let u = Bundle.main.url(forResource: base, withExtension: ext, subdirectory: dir),
+                  let t = try? String(contentsOf: u, encoding: .utf8) else {
+                throw NSError(domain: "SignEngine", code: -6, userInfo: [NSLocalizedDescriptionKey: "签名代码缺失：\(nm)"])
+            }
+            code += t + "\n"
+        }
+        // 转义为 JS 字符串字面量（反斜杠/双引号/换行）
+        var esc = ""
+        for ch in code {
+            switch ch {
+            case "\\": esc += "\\\\"
+            case "\"": esc += "\\\""
+            case "\n": esc += "\\n"
+            case "\r": break
+            default: esc.append(ch)
+            }
+        }
+        // 分块（每块 15000 字符，iOS evaluateJavaScript 绝对安全）
+        let chunk = 15_000
+        var parts: [String] = []
+        var remaining = Substring(esc)
+        while !remaining.isEmpty {
+            let end = remaining.index(remaining.startIndex, offsetBy: min(chunk, remaining.count), limitedBy: remaining.endIndex) ?? remaining.endIndex
+            parts.append(String(remaining[remaining.startIndex..<end]))
+            remaining = remaining[end...]
+        }
+        var exprs: [String] = []
+        for (i, part) in parts.enumerated() {
+            exprs.append("window.__p\(i) = \"\(part)\"")
+        }
+        exprs.append("window.__full = " + parts.indices.map { "__p\($0)" }.joined(separator: " + "))
+        exprs.append("eval(window.__full)")
+        for (i, ex) in exprs.enumerated() {
+            await eval(webView, ex)
+            if i < exprs.count - 1 && (i % 6 == 0 || i == exprs.count - 2) {
+                logText = "签名代码注入中 (\(i + 1)/\(exprs.count))…"
+            }
+        }
     }
 
     /// 分块注入 wasm base64，避免单次传超大字符串导致失败
@@ -2292,13 +2340,8 @@ struct SignWebView: UIViewRepresentable {
         engine.webView = wv
         engine.logText = "签名引擎加载中…"
         wv.navigationDelegate = context.coordinator
-        // 用 loadFileURL 加载单文件内联版（比 loadHTMLString 传大字符串更可靠）
-        if let path = Bundle.main.path(forResource: "sign_inline", ofType: "html", inDirectory: "WebSign") {
-            let fileURL = URL(fileURLWithPath: path)
-            wv.loadFileURL(fileURL, allowingReadAccessTo: fileURL.deletingLastPathComponent())
-        } else {
-            engine.logText = "签名页面文件缺失"
-        }
+        // 加载最小页面，所有 JS 由 Swift 分块注入（绕开大 HTML 在 iOS 上的加载问题）
+        wv.loadHTMLString("<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body></body></html>", baseURL: nil)
         return wv
     }
 
