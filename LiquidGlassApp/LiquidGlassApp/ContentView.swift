@@ -2168,8 +2168,10 @@ struct SignWebView: UIViewRepresentable {
         let wv = WKWebView(frame: .zero, configuration: config)
         engine.webView = wv
         engine.logText = "签名引擎加载中…"
-        if let url = Bundle.main.url(forResource: "sign", withExtension: "html", subdirectory: "WebSign") {
-            wv.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        // 单文件内联版：JS/wasm 全部内嵌，避免 file:// 跨文件读取被 iOS 拦截
+        if let path = Bundle.main.path(forResource: "sign_inline", ofType: "html", inDirectory: "WebSign"),
+           let html = try? String(contentsOfFile: path, encoding: .utf8) {
+            wv.loadHTMLString(html, baseURL: nil)
         }
         return wv
     }
