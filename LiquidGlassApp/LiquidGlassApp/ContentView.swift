@@ -1686,48 +1686,156 @@ struct RemoteConfigView: View {
 
 struct DownloadView: View {
     @EnvironmentObject var downloader: DownloadManager
+    @State private var filter = "文件"
+    @State private var actionItem: DownloadItem?
+    @State private var showActions = false
+    @State private var showShare = false
+    @State private var shareURL: URL?
+    @State private var showExport = false
+    @State private var exportURL: URL?
+    @State private var showSignAlert = false
 
     var body: some View {
         NavigationStack {
-            List {
-                if downloader.items.isEmpty {
-                    Section {
-                        Label("还没有下载任务", systemImage: "tray")
-                        Text("在首页点「获取」下载 IPA，会显示在这里")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            VStack(spacing: 0) {
+                // 苹果官方分段控件：文件 / 已签名
+                Picker("分类", selection: $filter) {
+                    Text("文件").tag("文件")
+                    Text("已签名").tag("已签名")
                 }
-                ForEach(downloader.items) { item in
-                    HStack(spacing: 12) {
-                        Image(systemName: item.state == "done" ? "checkmark.circle.fill"
-                              : item.state == "error" ? "xmark.circle.fill" : "arrow.down.circle")
-                            .foregroundStyle(item.state == "done" ? .green : item.state == "error" ? .red : .blue)
-                            .font(.title3)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(item.name)
-                                .font(.headline)
-                                .lineLimit(1)
-                            Text(item.state == "done" ? "已下载" : item.state == "error" ? "下载失败" : "下载中…")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if item.state == "downloading" {
-                            ProgressView(value: item.progress)
-                                .frame(width: 60)
-                        } else if item.state == "done" {
-                            Text("完成")
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                        }
-                    }
-                    .padding(.vertical, 4)
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+                .background(Color(.systemGroupedBackground))
+
+                if filter == "文件" {
+                    fileList
+                } else {
+                    signedList
                 }
             }
             .navigationTitle("下载")
+            .confirmationDialog("选择操作", isPresented: $showActions, titleVisibility: .visible) {
+                Button("签名") { showSignAlert = true }
+                Button("提取应用库") {
+                    exportURL = actionItem?.path
+                    showExport = actionItem?.path != nil
+                }
+                Button("分享") {
+                    shareURL = actionItem?.path
+                    showShare = actionItem?.path != nil
+                }
+                Button("删除", role: .destructive) {
+                    if let item = actionItem { deleteItem(item) }
+                }
+            } message: {
+                Text(actionItem?.name ?? "")
+            }
+            .alert("签名功能开发中", isPresented: $showSignAlert) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text("下载的 IPA 签名后会显示在「已签名」里，当前请先用全能签签名")
+            }
+            .sheet(isPresented: $showShare) {
+                if let url = shareURL {
+                    ActivityView(items: [url])
+                }
+            }
+            .sheet(isPresented: $showExport) {
+                if let url = exportURL {
+                    DocumentExporter(url: url)
+                }
+            }
         }
     }
+
+    /// 文件列表：下载中的 IPA
+    private var fileList: some View {
+        List {
+            if downloader.items.isEmpty {
+                Section {
+                    Label("还没有下载任务", systemImage: "tray")
+                    Text("在首页点「获取」下载 IPA，会显示在这里")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            ForEach(downloader.items) { item in
+                HStack(spacing: 12) {
+                    Image(systemName: item.state == "done" ? "checkmark.circle.fill"
+                          : item.state == "error" ? "xmark.circle.fill" : "arrow.down.circle")
+                        .foregroundStyle(item.state == "done" ? .green : item.state == "error" ? .red : .blue)
+                        .font(.title3)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(item.state == "done" ? "已下载" : item.state == "error" ? "下载失败" : "下载中…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if item.state == "downloading" {
+                        ProgressView(value: item.progress)
+                            .frame(width: 60)
+                    } else if item.state == "done" {
+                        // 下载完成：显示红色「删除」按钮
+                        Button(role: .destructive) {
+                            deleteItem(item)
+                        } label: {
+                            Text("删除")
+                                .font(.subheadline)
+                                .bold()
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { presentActions(for: item) }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    /// 已签名列表：签名后的 IPA
+    private var signedList: some View {
+        List {
+            Section {
+                Label("暂无已签名应用", systemImage: "checkmark.seal")
+                Text("下载的 IPA 签名后会显示在这里")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func presentActions(for item: DownloadItem) {
+        actionItem = item
+        showActions = true
+    }
+
+    private func deleteItem(_ item: DownloadItem) {
+        withAnimation {
+            downloader.items.removeAll { $0.id == item.id }
+        }
+    }
+}
+
+// MARK: - 系统分享面板（苹果官方）
+struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - 导出到文件 App（提取应用库，苹果官方）
+struct DocumentExporter: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        UIDocumentPickerViewController(forExporting: [url])
+    }
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
 }
 
 // MARK: - 设置页
