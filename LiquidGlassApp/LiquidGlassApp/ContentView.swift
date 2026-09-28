@@ -16,16 +16,12 @@ struct ContentView: View {
 
     var body: some View {
         TabView {
-            TabBarView()
-                .tabItem { Label("导航栏", systemImage: "rectangle.bottomthird.inset.filled") }
-            ButtonView()
-                .tabItem { Label("按钮", systemImage: "button.programmable") }
-            SliderView()
-                .tabItem { Label("滑动条", systemImage: "slider.horizontal.3") }
-            ToggleView()
-                .tabItem { Label("开关", systemImage: "switch.2") }
             AllComponentsView()
-                .tabItem { Label("组件大全", systemImage: "square.grid.3x3") }
+                .tabItem { Label("首页", systemImage: "house.fill") }
+            DownloadView()
+                .tabItem { Label("下载", systemImage: "arrow.down.circle.fill") }
+            SettingsView()
+                .tabItem { Label("设置", systemImage: "gearshape.fill") }
         }
         .onAppear {
             fetchLaunchNotice()
@@ -257,6 +253,12 @@ struct AllComponentsView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("核心组件") {
+                    NavigationLink("底部导航栏 TabView", destination: TabBarView())
+                    NavigationLink("原生按钮 Button", destination: ButtonView())
+                    NavigationLink("原生滑动条 Slider", destination: SliderView())
+                    NavigationLink("原生开关 Toggle", destination: ToggleView())
+                }
                 Section("输入类") {
                     NavigationLink("输入框 TextField", destination: TextFieldView())
                     NavigationLink("多行文本 TextEditor", destination: TextEditorView())
@@ -1302,6 +1304,58 @@ struct RemoteConfigView: View {
             }
         }
         .presentationDetents([.medium])
+    }
+}
+
+// MARK: - 下载页
+
+struct DownloadView: View {
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("下载") {
+                    Label("暂无下载内容，敬请期待", systemImage: "tray")
+                }
+            }
+            .navigationTitle("下载")
+        }
+    }
+}
+
+// MARK: - 设置页
+
+struct SettingsView: View {
+    @AppStorage("remoteURL") private var remoteURL = "https://ios.zhaisir.cn"
+    @State private var showRemoteConfig = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("公告设置") {
+                    Button {
+                        showRemoteConfig = true
+                    } label: {
+                        HStack {
+                            Label("公告后台地址", systemImage: "link")
+                            Spacer()
+                            Text(remoteURL)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                Section("关于") {
+                    Label("液态玻璃组件大全", systemImage: "sparkles")
+                    Label("所有组件均为苹果官方原生组件", systemImage: "checkmark.seal")
+                    Label("iOS 26 自动呈现液态玻璃效果", systemImage: "drop.fill")
+                }
+            }
+            .navigationTitle("设置")
+            .sheet(isPresented: $showRemoteConfig) {
+                RemoteConfigView(remoteURL: $remoteURL)
+            }
+        }
     }
 }
 
