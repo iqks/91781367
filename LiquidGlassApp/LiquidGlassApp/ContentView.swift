@@ -96,7 +96,7 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
 
     // 下载出错
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let error = error,
+        guard error != nil,
               let id = taskMap[task],
               let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].state = "error"
@@ -1696,25 +1696,7 @@ struct DownloadView: View {
     @State private var showSignAlert = false
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // 苹果官方分段控件：文件 / 已签名
-                Picker("分类", selection: $filter) {
-                    Text("文件").tag("文件")
-                    Text("已签名").tag("已签名")
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 10)
-                .background(Color(.systemGroupedBackground))
-
-                if filter == "文件" {
-                    fileList
-                } else {
-                    signedList
-                }
-            }
-            .navigationTitle("下载")
+        content
             .confirmationDialog("选择操作", isPresented: $showActions, titleVisibility: .visible) {
                 Button("签名") { showSignAlert = true }
                 Button("提取应用库") {
@@ -1736,16 +1718,47 @@ struct DownloadView: View {
             } message: {
                 Text("下载的 IPA 签名后会显示在「已签名」里，当前请先用全能签签名")
             }
-            .sheet(isPresented: $showShare) {
-                if let url = shareURL {
-                    ActivityView(items: [url])
+            .sheet(isPresented: $showShare, content: shareSheet)
+            .sheet(isPresented: $showExport, content: exportSheet)
+    }
+
+    /// 主内容：分段控件 + 列表
+    private var content: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                // 苹果官方分段控件：文件 / 已签名
+                Picker("分类", selection: $filter) {
+                    Text("文件").tag("文件")
+                    Text("已签名").tag("已签名")
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+                .background(Color(.systemGroupedBackground))
+
+                if filter == "文件" {
+                    fileList
+                } else {
+                    signedList
                 }
             }
-            .sheet(isPresented: $showExport) {
-                if let url = exportURL {
-                    DocumentExporter(url: url)
-                }
-            }
+            .navigationTitle("下载")
+        }
+    }
+
+    /// 分享面板
+    @ViewBuilder
+    private var shareSheet: some View {
+        if let url = shareURL {
+            ActivityView(items: [url])
+        }
+    }
+
+    /// 导出到文件 App
+    @ViewBuilder
+    private var exportSheet: some View {
+        if let url = exportURL {
+            DocumentExporter(url: url)
         }
     }
 
