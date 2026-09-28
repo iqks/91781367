@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UIKit
 import WebKit
+import Combine
 import UniformTypeIdentifiers
 
 // ============================================================
@@ -58,7 +59,7 @@ struct ContentView: View {
 
 /// 下载管理器：点「获取」下载 IPA 到 App 的 Downloads 目录
 class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
-    struct DownloadItem: Identifiable {
+    struct DownloadItem: Identifiable, Codable {
         let id = UUID()
         let name: String
         let url: URL
@@ -72,6 +73,42 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     @Published var shouldJumpToDownload = false   // 下载完成 → 跳下载页
     @Published var shouldRemoveCard = false       // 下载失败（链接失效）→ 删除卡片
     private var taskMap: [URLSessionTask: UUID] = [:]
+    private var cancellables: Set<AnyCancellable> = []
+
+    override init() {
+        super.init()
+        // 恢复上次的下载列表（重启不丢）
+        if let d = UserDefaults.standard.data(forKey: "dl_items"),
+           let a = try? JSONDecoder().decode([DownloadItem].self, from: d) {
+            items = a.map { restored($0, sub: "Downloads") }
+        }
+        if let d = UserDefaults.standard.data(forKey: "dl_signed"),
+           let a = try? JSONDecoder().decode([DownloadItem].self, from: d) {
+            signedItems = a.map { restored($0, sub: "Signed") }
+        }
+        $items.sink { [weak self] _ in self?.saveState() }.store(in: &cancellables)
+        $signedItems.sink { [weak self] _ in self?.saveState() }.store(in: &cancellables)
+    }
+
+    /// iOS 沙箱路径每次启动会变，恢复时用文件名重新拼当前路径
+    private func restored(_ item: DownloadItem, sub: String) -> DownloadItem {
+        var it = item
+        if it.state == "done" {
+            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent(sub, isDirectory: true)
+            it.path = dir.appendingPathComponent(it.name)
+        }
+        return it
+    }
+
+    private func saveState() {
+        if let d = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(d, forKey: "dl_items")
+        }
+        if let d = try? JSONEncoder().encode(signedItems) {
+            UserDefaults.standard.set(d, forKey: "dl_signed")
+        }
+    }
     private lazy var session: URLSession = {
         let cfg = URLSessionConfiguration.default
         return URLSession(configuration: cfg, delegate: self, delegateQueue: .main)
@@ -2100,7 +2137,8 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
         guard let webView = webView else {
             throw NSError(domain: "SignEngine", code: -3, userInfo: [NSLocalizedDescriptionKey: "签名页面未就绪，请重试"])
         }
-        try await waitReady(webView)
+        try await waitReady(webView)          // 等 HTML/JS 加载完
+        try await injectWasm(webView)         // 注入签名核心（分块）
         logText = "正在读取 IPA 文件…"
         let ipaB64 = try Data(contentsOf: ipaURL).base64EncodedString()
         let p12B64 = try Data(contentsOf: p12URL).base64EncodedString()
@@ -2119,7 +2157,8 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
     }
 
     private func waitReady(_ webView: WKWebView) async throws {
-        for _ in 0..<100 {
+        // 最长等 60 秒，确保 JS 加载完成
+        for _ in 0..<300 {
             let ok: Bool = await withCheckedContinuation { c in
                 webView.evaluateJavaScript("typeof signIpaStart !== 'undefined'") { r, _ in
                     c.resume(returning: (r as? Bool) ?? false)
@@ -2131,13 +2170,48 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
-        throw NSError(domain: "SignEngine", code: -2, userInfo: [NSLocalizedDescriptionKey: "签名引擎加载超时"])
+        throw NSError(domain: "SignEngine", code: -2, userInfo: [NSLocalizedDescriptionKey: "签名引擎加载超时（JS 未响应）"])
+    }
+
+    /// 分块注入 wasm base64，避免单次传超大字符串导致失败
+    private func injectWasm(_ webView: WKWebView) async throws {
+        guard let wasmURL = Bundle.main.url(forResource: "zsign-wasm", withExtension: "wasm", subdirectory: "WebSign"),
+              let wasmData = try? Data(contentsOf: wasmURL) else {
+            throw NSError(domain: "SignEngine", code: -4, userInfo: [NSLocalizedDescriptionKey: "签名核心文件缺失"])
+        }
+        let b64 = wasmData.base64EncodedString()
+        await eval(webView, "window.ZSIGN_WASM_B64 = ''")
+        let chunk = 400_000
+        var remaining = Substring(b64)
+        var parts: [String] = []
+        while !remaining.isEmpty {
+            let end = remaining.index(remaining.startIndex, offsetBy: min(chunk, remaining.count), limitedBy: remaining.endIndex) ?? remaining.endIndex
+            parts.append(String(remaining[remaining.startIndex..<end]))
+            remaining = remaining[end...]
+        }
+        for (i, part) in parts.enumerated() {
+            await eval(webView, "window.ZSIGN_WASM_B64 += '\(part)'")
+            logText = "签名核心注入中 (\(i + 1)/\(parts.count))…"
+        }
+        logText = "签名核心注入完成"
+    }
+
+    private func eval(_ webView: WKWebView, _ js: String) async {
+        await withCheckedContinuation { c in
+            webView.evaluateJavaScript(js) { _, _ in c.resume() }
+        }
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "signResult",
               let body = message.body as? [String: Any],
               let status = body["status"] as? String else { return }
+        if status == "log" {
+            // JS 实时日志/错误，显示在签名页底部
+            let msg = body["payload"] as? String ?? ""
+            logText = msg
+            return
+        }
         if status == "success", let payload = body["payload"] as? String, let data = Data(base64Encoded: payload) {
             logText = "签名成功，正在返回结果…"
             pendingContinuation?.resume(returning: data)
