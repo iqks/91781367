@@ -116,15 +116,36 @@ jobs:
 
       - name: 发布构建产物到 Releases（免登录下载）
         if: success()
-        run: |
-          cd LiquidGlassApp
-          TAG="build-$(date +%Y%m%d%H%M%S)"
-          gh release create "$TAG" \
-            "build/LiquidGlassApp.ipa" \
-            "build/Build/Products/Release-iphonesimulator/LiquidGlassApp_sim.zip" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "签名助手构建 $TAG" \
-            --notes "自动构建产物（免登录下载）" || echo "release 跳过"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const tag = 'build-' + Date.now();
+            const rel = await github.rest.repos.createRelease({
+              owner: context.repo.owner, repo: context.repo.repo,
+              tag_name: tag, name: '签名助手构建 ' + tag,
+              body: '自动构建产物（免登录下载）'
+            });
+            const files = [
+              'LiquidGlassApp/build/LiquidGlassApp.ipa',
+              'LiquidGlassApp/build/Build/Products/Release-iphonesimulator/LiquidGlassApp_sim.zip'
+            ];
+            let uploaded = 0;
+            for (const f of files) {
+              if (fs.existsSync(f)) {
+                const buf = fs.readFileSync(f);
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  release_id: rel.data.id,
+                  name: f.split('/').pop(),
+                  data: buf
+                });
+                uploaded++;
+              } else {
+                console.log('缺少文件: ' + f);
+              }
+            }
+            console.log('已上传 ' + uploaded + ' 个资产');
 
   # ============ 第二步：用免费 Apple ID 证书自动签名 ============
   # 需要先在 GitHub Secrets 配置：APPLE_ID / APPLE_PASSWORD / DEVICE_UDID
