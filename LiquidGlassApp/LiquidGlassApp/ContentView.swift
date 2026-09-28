@@ -2224,13 +2224,12 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
 
     /// 分块注入 JS 代码（jszip + zsign + sign），完全绕开大 HTML 加载
     private func injectJS(_ webView: WKWebView) async throws {
-        let dir = "WebSign"
         let names = ["jszip.min.js", "zsign-wasm.js", "sign.js"]
         var code = ""
         for nm in names {
             let base = (nm as NSString).deletingPathExtension
             let ext = (nm as NSString).pathExtension
-            guard let u = Bundle.main.url(forResource: base, withExtension: ext, subdirectory: dir),
+            guard let u = Bundle.main.url(forResource: base, withExtension: ext),
                   let t = try? String(contentsOf: u, encoding: .utf8) else {
                 throw NSError(domain: "SignEngine", code: -6, userInfo: [NSLocalizedDescriptionKey: "签名代码缺失：\(nm)"])
             }
@@ -2272,7 +2271,7 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
 
     /// 分块注入 wasm base64，避免单次传超大字符串导致失败
     private func injectWasm(_ webView: WKWebView) async throws {
-        guard let wasmURL = Bundle.main.url(forResource: "zsign-wasm", withExtension: "wasm", subdirectory: "WebSign"),
+        guard let wasmURL = Bundle.main.url(forResource: "zsign-wasm", withExtension: "wasm"),
               let wasmData = try? Data(contentsOf: wasmURL) else {
             throw NSError(domain: "SignEngine", code: -4, userInfo: [NSLocalizedDescriptionKey: "签名核心文件缺失"])
         }
