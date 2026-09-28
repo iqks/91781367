@@ -2291,15 +2291,34 @@ struct SignWebView: UIViewRepresentable {
         let wv = WKWebView(frame: .zero, configuration: config)
         engine.webView = wv
         engine.logText = "签名引擎加载中…"
-        // 单文件内联版：JS/wasm 全部内嵌，避免 file:// 跨文件读取被 iOS 拦截
-        if let path = Bundle.main.path(forResource: "sign_inline", ofType: "html", inDirectory: "WebSign"),
-           let html = try? String(contentsOfFile: path, encoding: .utf8) {
-            wv.loadHTMLString(html, baseURL: nil)
+        wv.navigationDelegate = context.coordinator
+        // 用 loadFileURL 加载单文件内联版（比 loadHTMLString 传大字符串更可靠）
+        if let path = Bundle.main.path(forResource: "sign_inline", ofType: "html", inDirectory: "WebSign") {
+            let fileURL = URL(fileURLWithPath: path)
+            wv.loadFileURL(fileURL, allowingReadAccessTo: fileURL.deletingLastPathComponent())
+        } else {
+            engine.logText = "签名页面文件缺失"
         }
         return wv
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    class Coordinator: NSObject, WKNavigationDelegate {
+        let parent: SignWebView
+        init(_ p: SignWebView) { parent = p }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            parent.engine.logText = "签名页面加载完成"
+        }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            parent.engine.logText = "页面加载失败：\(error.localizedDescription)"
+        }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            parent.engine.logText = "页面加载失败：\(error.localizedDescription)"
+        }
+    }
 }
 
 // MARK: - 设置页
