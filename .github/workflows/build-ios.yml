@@ -109,6 +109,23 @@ jobs:
           name: ios-simulator-app
           path: LiquidGlassApp/build/Build/Products/Release-iphonesimulator/LiquidGlassApp.app
 
+      - name: 打包模拟器版 zip
+        run: |
+          cd LiquidGlassApp/build/Build/Products/Release-iphonesimulator
+          zip -r LiquidGlassApp_sim.zip LiquidGlassApp.app
+
+      - name: 发布构建产物到 Releases（免登录下载）
+        if: success()
+        run: |
+          cd LiquidGlassApp
+          TAG="build-$(date +%Y%m%d%H%M%S)"
+          gh release create "$TAG" \
+            "build/LiquidGlassApp.ipa" \
+            "build/Build/Products/Release-iphonesimulator/LiquidGlassApp_sim.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "签名助手构建 $TAG" \
+            --notes "自动构建产物（免登录下载）" || echo "release 跳过"
+
   # ============ 第二步：用免费 Apple ID 证书自动签名 ============
   # 需要先在 GitHub Secrets 配置：APPLE_ID / APPLE_PASSWORD / DEVICE_UDID
   # 未配置时脚本自动跳过（只出未签名 IPA）
