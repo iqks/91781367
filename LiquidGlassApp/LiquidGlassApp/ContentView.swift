@@ -13,17 +13,28 @@ import UIKit
 
 struct ContentView: View {
     @StateObject private var downloader = DownloadManager()
+    @State private var selectedTab = 0
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             HomeView()
                 .environmentObject(downloader)
                 .tabItem { Label("首页", systemImage: "house.fill") }
+                .tag(0)
             DownloadView()
                 .environmentObject(downloader)
                 .tabItem { Label("下载", systemImage: "arrow.down.circle.fill") }
+                .tag(1)
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gearshape.fill") }
+                .tag(2)
+        }
+        .onChange(of: downloader.shouldJumpToDownload) { _ in
+            // 下载完成自动跳到「下载」页
+            if downloader.shouldJumpToDownload {
+                selectedTab = 1
+                downloader.shouldJumpToDownload = false
+            }
         }
     }
 }
@@ -40,6 +51,8 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     }
 
     @Published var items: [DownloadItem] = []
+    @Published var shouldJumpToDownload = false   // 下载完成 → 跳下载页
+    @Published var shouldRemoveCard = false       // 下载失败（链接失效）→ 删除卡片
     private var taskMap: [URLSessionTask: UUID] = [:]
     private lazy var session: URLSession = {
         let cfg = URLSessionConfiguration.default
@@ -77,6 +90,8 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
         items[idx].progress = 1.0
         items[idx].path = dest.path
         taskMap[downloadTask] = nil
+        // 下载完成：自动跳转到下载页
+        shouldJumpToDownload = true
     }
 
     // 下载出错
@@ -86,6 +101,8 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
               let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].state = "error"
         taskMap[task] = nil
+        // 下载失败（链接失效）：删除卡片
+        shouldRemoveCard = true
     }
 }
 
@@ -314,6 +331,23 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             List {
+                if appName.isEmpty {
+                    // 链接失效删卡后的空状态
+                    Section {
+                        VStack(spacing: 12) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 34))
+                                .foregroundStyle(.secondary)
+                            Text("暂无应用")
+                                .font(.headline)
+                            Text("点右上角「＋」上传应用卡片")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                    }
+                } else {
                 Section {
                     // 应用卡片：图标 / 名字 / 版本 / 上传时间 / 获取按钮
                     VStack(alignment: .leading, spacing: 0) {
@@ -363,6 +397,7 @@ struct HomeView: View {
                             .padding(.vertical, 10)
                     }
                 }
+                }
             }
             .searchable(text: $searchText, prompt: "搜索")
             .navigationTitle("签名助手")
@@ -398,6 +433,15 @@ struct HomeView: View {
             } message: {
                 Text(cloudErrorMsg)
             }
+            .onChange(of: downloader.shouldRemoveCard) { _ in
+                // 下载失败（链接失效）：删除卡片，并同步清空云端
+                if downloader.shouldRemoveCard {
+                    downloader.shouldRemoveCard = false
+                    Task {
+                        await removeCardAndClearCloud()
+                    }
+                }
+            }
         }
     }
 
@@ -407,7 +451,7 @@ struct HomeView: View {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard let remote = try? JSONDecoder().decode(RemoteContent.self, from: data),
-                  let app = remote.app, !app.name.isEmpty else { return }
+                  let app = remote.app else { return }
             appName = app.name
             appDesc = app.desc
             appLink = app.link
@@ -417,6 +461,35 @@ struct HomeView: View {
             }
         } catch {
             // 连不上后台就保留本地内容
+        }
+    }
+
+    /// 链接失效：删除本地卡片并同步清空云端（其他设备也删掉）
+    func removeCardAndClearCloud() async {
+        appName = ""
+        appDesc = ""
+        appLink = ""
+        appUploadTime = ""
+        appIconData = nil
+        _ = await pushCloudApp(name: "", desc: "", link: "", iconB64: "")
+    }
+
+    /// 推送应用信息到云端后台
+    func pushCloudApp(name: String, desc: String, link: String, iconB64: String) async -> Bool {
+        guard let url = URL(string: backendBase + "/api/app") else { return false }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: String] = [
+            "name": name, "desc": desc, "link": link,
+            "time": HomeView.currentTimeString() + " 上传", "icon": iconB64
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            return (resp as? HTTPURLResponse)?.statusCode == 200
+        } catch {
+            return false
         }
     }
 
@@ -449,11 +522,6 @@ struct UploadAppView: View {
         _desc = State(initialValue: appDesc)
         _link = State(initialValue: appLink)
         self.onSave = onSave
-    }
-
-    /// 是否检测到 IPA 链接（链接里包含 .ipa 才算）
-    private var isIPALink: Bool {
-        link.lowercased().contains(".ipa")
     }
 
     var body: some View {
@@ -497,13 +565,9 @@ struct UploadAppView: View {
                         .keyboardType(.URL)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
-                    if isIPALink {
-                        Label("检测到 IPA 链接，可以上传", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    } else {
-                        Label("未检测到 .ipa 链接，无法上传", systemImage: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                    }
+                    Label("不限后缀，上传时会自动检测链接里能否下载 IPA", systemImage: "link")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("上传时间") {
                     Text(HomeView.currentTimeString())
@@ -517,7 +581,7 @@ struct UploadAppView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(uploading ? "上传中…" : "上传") {
+                    Button(uploading ? "检测中…" : "上传") {
                         guard !uploading else { return }
                         uploading = true
                         let finalName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -526,6 +590,16 @@ struct UploadAppView: View {
                         let finalIcon = iconData
                         let time = HomeView.currentTimeString() + " 上传"
                         Task {
+                            // 先验证链接里能不能下载 IPA（不只看后缀）
+                            let isIPA = await verifyIPALink(finalLink)
+                            guard isIPA else {
+                                await MainActor.run {
+                                    uploading = false
+                                    errorMsg = "链接打不开，或里面不是能下载的 IPA 文件，请换一个链接"
+                                    showError = true
+                                }
+                                return
+                            }
                             let ok = await uploadToCloud(name: finalName.isEmpty ? "签名助手" : finalName,
                                                          desc: finalDesc, link: finalLink, time: time,
                                                          iconB64: finalIcon?.base64EncodedString() ?? "")
@@ -543,7 +617,7 @@ struct UploadAppView: View {
                             }
                         }
                     }
-                    .disabled(!isIPALink || uploading)
+                    .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || uploading)
                 }
             }
             .alert("上传失败", isPresented: $showError) {
@@ -551,6 +625,32 @@ struct UploadAppView: View {
             } message: {
                 Text(errorMsg)
             }
+        }
+    }
+
+    /// 验证链接内容：请求前几个字节，检测是否为 IPA（zip 格式 PK 开头），不限制后缀
+    func verifyIPALink(_ urlString: String) async -> Bool {
+        guard let url = URL(string: urlString) else { return false }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 15
+        req.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse else { return false }
+            if http.statusCode == 200 || http.statusCode == 206 {
+                // IPA 本质是 zip，开头必须是 PK
+                if data.count >= 2, Array(data.prefix(2)) == [0x50, 0x4B] {
+                    return true
+                }
+                // 兜底：Content-Type 带 ipa / zip / octet-stream
+                if let ct = http.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
+                   ct.contains("ipa") || ct.contains("zip") || ct.contains("octet-stream") {
+                    return true
+                }
+            }
+            return false
+        } catch {
+            return false
         }
     }
 
