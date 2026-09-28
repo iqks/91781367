@@ -1718,8 +1718,8 @@ struct DownloadView: View {
             } message: {
                 Text("下载的 IPA 签名后会显示在「已签名」里，当前请先用全能签签名")
             }
-            .sheet(isPresented: $showShare, content: shareSheet)
-            .sheet(isPresented: $showExport, content: exportSheet)
+            .sheet(isPresented: $showShare) { shareSheet }
+            .sheet(isPresented: $showExport) { exportSheet }
     }
 
     /// 主内容：分段控件 + 列表
