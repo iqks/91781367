@@ -1684,15 +1684,24 @@ struct RemoteConfigView: View {
 
 // MARK: - 下载页
 
+/// 下载页底部弹窗类型
+enum ActiveSheet: Identifiable {
+    case share(URL)
+    case export(URL)
+    var id: String {
+        switch self {
+        case .share(let url): return "share\(url.absoluteString)"
+        case .export(let url): return "export\(url.absoluteString)"
+        }
+    }
+}
+
 struct DownloadView: View {
     @EnvironmentObject var downloader: DownloadManager
     @State private var filter = "文件"
     @State private var actionItem: DownloadManager.DownloadItem?
     @State private var showActions = false
-    @State private var showShare = false
-    @State private var shareURL: URL?
-    @State private var showExport = false
-    @State private var exportURL: URL?
+    @State private var activeSheet: ActiveSheet?
     @State private var showSignAlert = false
 
     var body: some View {
@@ -1700,12 +1709,10 @@ struct DownloadView: View {
             .confirmationDialog("选择操作", isPresented: $showActions, titleVisibility: .visible) {
                 Button("签名") { showSignAlert = true }
                 Button("提取应用库") {
-                    exportURL = actionItem?.path
-                    showExport = actionItem?.path != nil
+                    if let url = actionItem?.path { activeSheet = .export(url) }
                 }
                 Button("分享") {
-                    shareURL = actionItem?.path
-                    showShare = actionItem?.path != nil
+                    if let url = actionItem?.path { activeSheet = .share(url) }
                 }
                 Button("删除", role: .destructive) {
                     if let item = actionItem { deleteItem(item) }
@@ -1718,8 +1725,14 @@ struct DownloadView: View {
             } message: {
                 Text("下载的 IPA 签名后会显示在「已签名」里，当前请先用全能签签名")
             }
-            .sheet(isPresented: $showShare) { shareSheet }
-            .sheet(isPresented: $showExport) { exportSheet }
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .share(let url):
+                    ActivityView(items: [url])
+                case .export(let url):
+                    DocumentExporter(url: url)
+                }
+            }
     }
 
     /// 主内容：分段控件 + 列表
@@ -1743,22 +1756,6 @@ struct DownloadView: View {
                 }
             }
             .navigationTitle("下载")
-        }
-    }
-
-    /// 分享面板
-    @ViewBuilder
-    private var shareSheet: some View {
-        if let url = shareURL {
-            ActivityView(items: [url])
-        }
-    }
-
-    /// 导出到文件 App
-    @ViewBuilder
-    private var exportSheet: some View {
-        if let url = exportURL {
-            DocumentExporter(url: url)
         }
     }
 
