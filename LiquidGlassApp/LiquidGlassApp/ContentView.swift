@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 // ============================================================
 //  签名助手 App —— SwiftUI 原生版
@@ -215,6 +217,16 @@ struct ToggleView: View {
 
 struct HomeView: View {
     @State private var searchText = ""
+    @State private var showUpload = false
+
+    // 已上传的应用信息（持久化保存）
+    @AppStorage("appName") private var appName = "签名助手"
+    @AppStorage("appDesc") private var appDesc = "签名助手是一款用苹果官方原生组件打造的签名工具，支持应用多开、证书管理、一键签名安装，全程免费、无需电脑。"
+    @AppStorage("appLink") private var appLink = ""
+    @AppStorage("appUploadTime") private var appUploadTime = "2026年8月19日 5:41 上传"
+    @AppStorage("appIconData") private var appIconData: Data?
+
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -223,36 +235,51 @@ struct HomeView: View {
                     // 应用卡片：图标 / 名字 / 版本 / 上传时间 / 获取按钮
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 14) {
-                            // 应用图标
-                            RoundedRectangle(cornerRadius: 18)
-                                .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                .frame(width: 64, height: 64)
-                                .overlay(
-                                    Image(systemName: "signature")
-                                        .font(.system(size: 26, weight: .bold))
-                                        .foregroundStyle(.white)
-                                )
+                            // 应用图标（上传过就显示上传的，否则默认）
+                            if let data = appIconData, let ui = UIImage(data: data) {
+                                Image(uiImage: ui)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 64, height: 64)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                            } else {
+                                RoundedRectangle(cornerRadius: 18)
+                                    .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .frame(width: 64, height: 64)
+                                    .overlay(
+                                        Image(systemName: "signature")
+                                            .font(.system(size: 26, weight: .bold))
+                                            .foregroundStyle(.white)
+                                    )
+                            }
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("签名助手")
+                                Text(appName)
                                     .font(.headline)
                                 Text("版本 1.0.0")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-                                Text("2026年8月19日 5:41 上传")
+                                Text(appUploadTime)
                                     .font(.caption)
                                     .foregroundStyle(.tertiary)
                             }
                             Spacer()
-                            Button("获取") {
-                                // 下载/安装功能后续接入
+                            // 获取按钮（加大版）
+                            Button {
+                                if let url = URL(string: appLink), !appLink.isEmpty {
+                                    openURL(url)
+                                }
+                            } label: {
+                                Text("获取")
+                                    .font(.headline)
+                                    .padding(.horizontal, 22)
+                                    .padding(.vertical, 9)
                             }
                             .buttonStyle(.borderedProminent)
                             .clipShape(Capsule())
-                            .controlSize(.small)
                         }
                         .padding(.vertical, 10)
                         Divider()
-                        Text("签名助手是一款用苹果官方原生组件打造的签名工具，支持应用多开、证书管理、一键签名安装，全程免费、无需电脑。")
+                        Text(appDesc)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 10)
@@ -261,6 +288,133 @@ struct HomeView: View {
             }
             .searchable(text: $searchText, prompt: "搜索")
             .navigationTitle("签名助手")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showUpload = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+            .sheet(isPresented: $showUpload) {
+                UploadAppView(
+                    appName: appName,
+                    appDesc: appDesc,
+                    appLink: appLink,
+                    onSave: { name, desc, link, icon in
+                        appName = name
+                        appDesc = desc
+                        appLink = link
+                        appIconData = icon
+                        appUploadTime = HomeView.currentTimeString() + " 上传"
+                    }
+                )
+            }
+        }
+    }
+
+    /// 自动生成当前上传时间
+    static func currentTimeString() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy年M月d日 HH:mm"
+        return f.string(from: Date())
+    }
+}
+
+/// 上传应用表单（点导航栏 + 弹出）
+struct UploadAppView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var desc: String
+    @State private var link: String
+    @State private var pickedItem: PhotosPickerItem?
+    @State private var iconData: Data?
+
+    let onSave: (String, String, String, Data?) -> Void
+
+    init(appName: String, appDesc: String, appLink: String, onSave: @escaping (String, String, String, Data?) -> Void) {
+        _name = State(initialValue: appName)
+        _desc = State(initialValue: appDesc)
+        _link = State(initialValue: appLink)
+        self.onSave = onSave
+    }
+
+    /// 是否检测到 IPA 链接（链接里包含 .ipa 才算）
+    private var isIPALink: Bool {
+        link.lowercased().contains(".ipa")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("应用图标") {
+                    PhotosPicker(selection: $pickedItem, matching: .images) {
+                        HStack(spacing: 14) {
+                            if let data = iconData, let ui = UIImage(data: data) {
+                                Image(uiImage: ui)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 56, height: 56)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                            } else {
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(Color(.systemGray5))
+                                    .frame(width: 56, height: 56)
+                                    .overlay(Image(systemName: "plus").foregroundStyle(.secondary))
+                            }
+                            Text("点此选择应用图标").foregroundStyle(.secondary)
+                        }
+                    }
+                    .onChange(of: pickedItem) { item in
+                        Task {
+                            guard let item = item,
+                                  let data = try? await item.loadTransferable(type: Data.self),
+                                  let ui = UIImage(data: data) else { return }
+                            let small = ui.preparingThumbnail(of: CGSize(width: 256, height: 256)) ?? ui
+                            iconData = small.jpegData(compressionQuality: 0.8)
+                        }
+                    }
+                }
+                Section("应用信息") {
+                    TextField("应用名字", text: $name)
+                    TextField("介绍文字", text: $desc, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+                Section("IPA 链接") {
+                    TextField("https://…/应用.ipa", text: $link)
+                        .keyboardType(.URL)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    if isIPALink {
+                        Label("检测到 IPA 链接，可以上传", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Label("未检测到 .ipa 链接，无法上传", systemImage: "xmark.circle.fill")
+                            .foregroundStyle(.red)
+                    }
+                }
+                Section("上传时间") {
+                    Text(HomeView.currentTimeString())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("上传应用")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("上传") {
+                        let finalName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let finalLink = link.trimmingCharacters(in: .whitespacesAndNewlines)
+                        onSave(finalName.isEmpty ? "签名助手" : finalName, desc, finalLink, iconData)
+                        dismiss()
+                    }
+                    .disabled(!isIPALink)
+                }
+            }
         }
     }
 }
