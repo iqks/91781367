@@ -13,6 +13,9 @@ targets:
       path: LiquidGlassApp/Info.plist
       properties:
         CFBundleDisplayName: 签名助手
+        CFBundleURLTypes:
+          - CFBundleURLName: signhelper
+            CFBundleURLSchemes: [signhelper]
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
