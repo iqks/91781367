@@ -1,6 +1,8 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import WebKit
+import UniformTypeIdentifiers
 
 // ============================================================
 //  签名助手 App —— SwiftUI 原生版
@@ -14,6 +16,7 @@ import UIKit
 struct ContentView: View {
     @StateObject private var downloader = DownloadManager()
     @State private var selectedTab = 0
+    @AppStorage("darkMode") private var darkMode = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -36,6 +39,7 @@ struct ContentView: View {
                 downloader.shouldJumpToDownload = false
             }
         }
+        .preferredColorScheme(darkMode ? .dark : .light)
     }
 }
 
@@ -1703,6 +1707,11 @@ struct DownloadView: View {
     @State private var showActions = false
     @State private var activeSheet: ActiveSheet?
     @State private var showSignAlert = false
+    @State private var showImporter = false
+    @State private var showURLInput = false
+    @State private var inputURL = ""
+    @State private var showBrowser = false
+    @State private var browserURL: URL?
 
     var body: some View {
         content
@@ -1733,6 +1742,23 @@ struct DownloadView: View {
                     DocumentExporter(url: url)
                 }
             }
+            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.item]) { result in
+                if case .success(let url) = result {
+                    importFile(url)
+                }
+            }
+            .alert("网址下载", isPresented: $showURLInput) {
+                TextField("https://…", text: $inputURL)
+                Button("打开内置浏览器") { openBrowser() }
+                Button("取消", role: .cancel) {}
+            }
+            .sheet(isPresented: $showBrowser) {
+                if let url = browserURL {
+                    WebBrowserView(startURL: url) { dl in
+                        downloader.startDownload(url: dl)
+                    }
+                }
+            }
     }
 
     /// 主内容：分段控件 + 列表
@@ -1756,6 +1782,20 @@ struct DownloadView: View {
                 }
             }
             .navigationTitle("下载")
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showImporter = true
+                    } label: {
+                        Label("导入", systemImage: "square.and.arrow.down")
+                    }
+                    Button {
+                        showURLInput = true
+                    } label: {
+                        Label("网址下载", systemImage: "globe")
+                    }
+                }
+            }
         }
     }
 
@@ -1802,6 +1842,16 @@ struct DownloadView: View {
                 .onTapGesture { presentActions(for: item) }
                 .padding(.vertical, 4)
             }
+            if !downloader.items.isEmpty {
+                Section {
+                    Button(role: .destructive) {
+                        withAnimation { downloader.items.removeAll() }
+                    } label: {
+                        Label("全部删除", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
         }
     }
 
@@ -1839,6 +1889,28 @@ struct DownloadView: View {
             downloader.items.removeAll { $0.id == item.id }
         }
     }
+
+    /// 从文件 App 导入 IPA 到下载列表
+    private func importFile(_ url: URL) {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Downloads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let name = url.lastPathComponent
+        let dest = dir.appendingPathComponent(name)
+        try? FileManager.default.copyItem(at: url, to: dest)
+        let item = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest)
+        withAnimation { downloader.items.append(item) }
+    }
+
+    /// 打开内置浏览器
+    private func openBrowser() {
+        let t = inputURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: t), url.scheme != nil else { return }
+        browserURL = url
+        showBrowser = true
+    }
 }
 
 // MARK: - 系统分享面板（苹果官方）
@@ -1859,39 +1931,138 @@ struct DocumentExporter: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
 }
 
+// MARK: - 内置浏览器（网址下载用，检测到 IPA 直接下载）
+struct WebBrowserView: UIViewControllerRepresentable {
+    let startURL: URL
+    let onDownload: (URL) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIViewController(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.navigationDelegate = context.coordinator
+        webView.load(URLRequest(url: startURL))
+        return webView
+    }
+
+    func updateUIViewController(_ uiViewController: WKWebView, context: Context) {}
+
+    class Coordinator: NSObject, WKNavigationDelegate {
+        let parent: WebBrowserView
+        init(_ parent: WebBrowserView) { self.parent = parent }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            if let url = navigationAction.request.url {
+                let s = url.absoluteString.lowercased()
+                // 检测到 IPA 下载链接：直接下载，不弹确认
+                if s.contains(".ipa") || s.contains("/download") || s.contains("download?") {
+                    parent.onDownload(url)
+                    decisionHandler(.cancel)
+                    return
+                }
+            }
+            decisionHandler(.allow)
+        }
+    }
+}
+
 // MARK: - 设置页
 
 struct SettingsView: View {
-    @AppStorage("remoteURL") private var remoteURL = "https://ios.zhaisir.cn"
-    @State private var showRemoteConfig = false
+    @AppStorage("darkMode") private var darkMode = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("公告设置") {
-                    Button {
-                        showRemoteConfig = true
+                Section("证书") {
+                    NavigationLink {
+                        CertificateSettingsView()
                     } label: {
-                        HStack {
-                            Label("公告后台地址", systemImage: "link")
-                            Spacer()
-                            Text(remoteURL)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                        Label("证书管理", systemImage: "key.fill")
                     }
                 }
-                Section("关于") {
-                    Label("签名助手", systemImage: "signature")
-                    Label("苹果官方原生组件打造", systemImage: "checkmark.seal")
-                    Label("支持应用多开与一键签名", systemImage: "sparkles")
+                Section("设备") {
+                    NavigationLink {
+                        UDIDSettingsView()
+                    } label: {
+                        Label("设备 UDID", systemImage: "iphone")
+                    }
+                }
+                Section("外观设置") {
+                    Toggle("深色模式", isOn: $darkMode)
+                        .tint(.blue)
                 }
             }
             .navigationTitle("设置")
-            .sheet(isPresented: $showRemoteConfig) {
-                RemoteConfigView(remoteURL: $remoteURL)
+        }
+    }
+}
+
+/// 证书管理：内置证书，无需手动导入
+struct CertificateSettingsView: View {
+    var body: some View {
+        Form {
+            Section("内置证书") {
+                Label("已预装内置证书", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                Text("签名时自动使用，无需手动导入")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+        }
+        .navigationTitle("证书管理")
+    }
+}
+
+/// 设备 UDID：安装描述文件自动获取
+struct UDIDSettingsView: View {
+    @AppStorage("remoteURL") private var remoteURL = "https://ios.zhaisir.cn"
+    @State private var udid = ""
+
+    var body: some View {
+        Form {
+            Section {
+                Button {
+                    if let url = URL(string: remoteURL + "/udid.mobileconfig") {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Label("安装描述文件获取 UDID", systemImage: "arrow.down.doc.fill")
+                }
+            } footer: {
+                Text("在 Safari 中打开并安装描述文件，安装完成后自动返回本 App")
+            }
+            Section("当前设备 UDID") {
+                if udid.isEmpty {
+                    Text("安装描述文件后自动显示")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(udid)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .navigationTitle("设备 UDID")
+        .task { await fetchUDID() }
+    }
+
+    func fetchUDID() async {
+        guard let url = URL(string: remoteURL + "/udid_list.json") else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let obj = try? JSONSerialization.jsonObject(with: data) {
+                if let arr = obj as? [[String: Any]], let last = arr.last, let u = last["udid"] as? String {
+                    udid = u
+                } else if let dict = obj as? [String: Any] {
+                    if let arr = dict["devices"] as? [[String: Any]], let last = arr.last, let u = last["udid"] as? String {
+                        udid = u
+                    } else if let u = dict["udid"] as? String {
+                        udid = u
+                    }
+                }
+            }
+        } catch {
         }
     }
 }
