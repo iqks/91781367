@@ -264,9 +264,6 @@ struct HomeView: View {
         }
     }
 }
-        }
-    }
-}
 
 // MARK: - 输入框
 
