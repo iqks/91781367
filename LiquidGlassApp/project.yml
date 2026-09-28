@@ -12,7 +12,7 @@ targets:
     info:
       path: LiquidGlassApp/Info.plist
       properties:
-        CFBundleDisplayName: 液态玻璃
+        CFBundleDisplayName: 签名助手
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true

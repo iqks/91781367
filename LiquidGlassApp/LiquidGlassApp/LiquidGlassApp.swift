@@ -5,7 +5,7 @@ struct LiquidGlassApp: App {
     @State private var noticeText = ""
     @State private var noticeLink: String?
     @State private var showNotice = false
-    @AppStorage("remoteURL") private var remoteURL = "https://store.eoty.cn/%E5%85%AC%E5%91%8A.txt/nOzHI_arx2Ne-wCE2R6P"
+    @AppStorage("remoteURL") private var remoteURL = "https://ios.zhaisir.cn"
     @Environment(\.openURL) private var openURL
 
     var body: some Scene {

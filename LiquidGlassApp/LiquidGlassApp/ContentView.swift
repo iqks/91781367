@@ -1,60 +1,24 @@
 import SwiftUI
 
 // ============================================================
-//  苹果官方组件大全 App —— SwiftUI 原生版
+//  签名助手 App —— SwiftUI 原生版
 //
 //  · 底部导航栏：TabView（系统原生 TabBar，App Store 同款）
-//  · 5 个主页面 + 组件大全二级导航（17 个子页面）
+//  · 3 个主页面（首页/下载/设置）+ 组件演示子页面
 //  · 全部使用系统原生组件，iOS 26 自动呈现液态玻璃材质，
 //    旧系统自动回退原生磨砂，无需任何判断代码
 // ============================================================
 
 struct ContentView: View {
-    @State private var launchNotice: Announcement?
-    @State private var showLaunchNotice = false
-    @Environment(\.openURL) private var openURL
-
     var body: some View {
         TabView {
-            AllComponentsView()
+            HomeView()
                 .tabItem { Label("首页", systemImage: "house.fill") }
             DownloadView()
                 .tabItem { Label("下载", systemImage: "arrow.down.circle.fill") }
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gearshape.fill") }
         }
-        .onAppear {
-            fetchLaunchNotice()
-        }
-        // 启动公告：系统警告框。有链接显示"立即更新"，否则只有"知道了"
-        .alert("公告", isPresented: $showLaunchNotice, presenting: launchNotice) { a in
-            if let link = a.link, !link.isEmpty {
-                Button("立即更新") {
-                    if let url = URL(string: link) {
-                        openURL(url)
-                    }
-                }
-                Button("知道了", role: .cancel) {}
-            } else {
-                Button("知道了", role: .cancel) {}
-            }
-        } message: { a in
-            Text(a.content)
-        }
-    }
-
-    /// 启动时从隧道拉取公告并弹出系统警告框
-    func fetchLaunchNotice() {
-        guard let url = URL(string: "https://ios.zhaisir.cn/api/content") else { return }
-        URLSession.shared.dataTask(with: url) { data, _, _ in
-            guard let data = data,
-                  let remote = try? JSONDecoder().decode(RemoteData.self, from: data),
-                  let first = remote.announcements.first else { return }
-            DispatchQueue.main.async {
-                launchNotice = first
-                showLaunchNotice = true
-            }
-        }.resume()
     }
 }
 
@@ -247,54 +211,59 @@ struct ToggleView: View {
     }
 }
 
-// MARK: - 页面 5：组件大全（二级导航）
+// MARK: - 组件演示子页面
 
-struct AllComponentsView: View {
+struct HomeView: View {
+    @State private var searchText = ""
+
     var body: some View {
         NavigationStack {
             List {
-                Section("核心组件") {
-                    NavigationLink("底部导航栏 TabView", destination: TabBarView())
-                    NavigationLink("原生按钮 Button", destination: ButtonView())
-                    NavigationLink("原生滑动条 Slider", destination: SliderView())
-                    NavigationLink("原生开关 Toggle", destination: ToggleView())
-                }
-                Section("输入类") {
-                    NavigationLink("输入框 TextField", destination: TextFieldView())
-                    NavigationLink("多行文本 TextEditor", destination: TextEditorView())
-                }
-                Section("选择类") {
-                    NavigationLink("选择器 Picker", destination: PickerView())
-                    NavigationLink("日期时间 DatePicker", destination: DatePickerView())
-                    NavigationLink("颜色选择 ColorPicker", destination: ColorPickerView())
-                }
-                Section("数值类") {
-                    NavigationLink("步进器 Stepper", destination: StepperView())
-                    NavigationLink("进度条 ProgressView", destination: ProgressViewPage())
-                    NavigationLink("仪表盘 Gauge", destination: GaugeView())
-                }
-                Section("展示类") {
-                    NavigationLink("文本与链接 Text/Link", destination: TextViewPage())
-                    NavigationLink("图片与图标 Image", destination: ImageViewPage())
-                    NavigationLink("徽标 Badge", destination: BadgeViewPage())
-                }
-                Section("容器类") {
-                    NavigationLink("列表与表单 List/Form", destination: ListFormViewPage())
-                    NavigationLink("分组框 GroupBox", destination: GroupBoxViewPage())
-                    NavigationLink("折叠面板 DisclosureGroup", destination: DisclosureGroupViewPage())
-                    NavigationLink("网格布局 Grid", destination: GridViewPage())
-                }
-                Section("交互类") {
-                    NavigationLink("弹窗与菜单 Alert/Menu", destination: DialogViewPage())
-                    NavigationLink("搜索框 Searchable", destination: SearchableViewPage())
-                    NavigationLink("手势交互 Gesture", destination: GestureViewPage())
-                    NavigationLink("悬浮按钮 FloatingButton", destination: FloatingButtonView())
-                }
-                Section("后台") {
-                    NavigationLink("后台公告 RemoteContent", destination: RemoteContentView())
+                Section {
+                    // 应用卡片：图标 / 名字 / 版本 / 上传时间 / 获取按钮
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 14) {
+                            // 应用图标
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 64, height: 64)
+                                .overlay(
+                                    Image(systemName: "signature")
+                                        .font(.system(size: 26, weight: .bold))
+                                        .foregroundStyle(.white)
+                                )
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("签名助手")
+                                    .font(.headline)
+                                Text("版本 1.0.0")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Text("2026年8月19日 5:41 上传")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            Button("获取") {
+                                // 下载/安装功能后续接入
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .clipShape(Capsule())
+                            .controlSize(.small)
+                        }
+                        .padding(.vertical, 10)
+                        Divider()
+                        Text("签名助手是一款用苹果官方原生组件打造的签名工具，支持应用多开、证书管理、一键签名安装，全程免费、无需电脑。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 10)
+                    }
                 }
             }
-            .navigationTitle("组件大全")
+            .searchable(text: $searchText, prompt: "搜索")
+            .navigationTitle("签名助手")
+        }
+    }
+}
         }
     }
 }
@@ -1346,9 +1315,9 @@ struct SettingsView: View {
                     }
                 }
                 Section("关于") {
-                    Label("液态玻璃组件大全", systemImage: "sparkles")
-                    Label("所有组件均为苹果官方原生组件", systemImage: "checkmark.seal")
-                    Label("iOS 26 自动呈现液态玻璃效果", systemImage: "drop.fill")
+                    Label("签名助手", systemImage: "signature")
+                    Label("苹果官方原生组件打造", systemImage: "checkmark.seal")
+                    Label("支持应用多开与一键签名", systemImage: "sparkles")
                 }
             }
             .navigationTitle("设置")
