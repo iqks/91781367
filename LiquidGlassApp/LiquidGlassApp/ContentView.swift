@@ -1932,20 +1932,20 @@ struct DocumentExporter: UIViewControllerRepresentable {
 }
 
 // MARK: - 内置浏览器（网址下载用，检测到 IPA 直接下载）
-struct WebBrowserView: UIViewControllerRepresentable {
+struct WebBrowserView: UIViewRepresentable {
     let startURL: URL
     let onDownload: (URL) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    func makeUIViewController(context: Context) -> WKWebView {
+    func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
         webView.navigationDelegate = context.coordinator
         webView.load(URLRequest(url: startURL))
         return webView
     }
 
-    func updateUIViewController(_ uiViewController: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
 
     class Coordinator: NSObject, WKNavigationDelegate {
         let parent: WebBrowserView
