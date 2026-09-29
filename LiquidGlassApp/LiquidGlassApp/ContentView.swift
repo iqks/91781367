@@ -1768,6 +1768,7 @@ struct DownloadView: View {
     @State private var signMessage = ""
     @State private var showSignSheet = false
     @State private var signTarget: DownloadManager.DownloadItem?
+    @State private var uploadProgress: Double?     // 上传安装包进度（nil=未在上传）
     @State private var showInstallPrompt = false   // 签名完成 → 自动弹安装确认
     @State private var pendingInstallURL: URL?     // 待安装的已签名 IPA
     @State private var pendingInstallName = ""
@@ -1838,6 +1839,21 @@ struct DownloadView: View {
                     }
                     .interactiveDismissDisabled(true)
                     .onAppear { startActualSign() }
+                }
+            }
+            .overlay {
+                if let p = uploadProgress {
+                    VStack(spacing: 8) {
+                        ProgressView(value: p)
+                            .frame(width: 220)
+                        Text("正在上传安装包 \(Int(p * 100))%…")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(20)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .shadow(radius: 8)
+                    .padding(.bottom, 60)
                 }
             }
             .alert("签名完成", isPresented: $showInstallPrompt) {
@@ -2093,8 +2109,14 @@ struct DownloadView: View {
                 let cfg = URLSessionConfiguration.ephemeral
                 cfg.timeoutIntervalForRequest = 180
                 cfg.timeoutIntervalForResource = 240
-                let session = URLSession(configuration: cfg, delegate: SelfSignedSessionDelegate(), delegateQueue: nil)
+                let delegate = SelfSignedSessionDelegate()
+                delegate.onProgress = { [weak self] p in
+                    DispatchQueue.main.async { self?.uploadProgress = p }
+                }
+                let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
+                DispatchQueue.main.async { self.uploadProgress = 0.001 }
                 let (respData, _) = try await session.upload(for: req, from: data)
+                DispatchQueue.main.async { self.uploadProgress = nil }
                 if let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
                    let ok = obj["ok"] as? Bool, ok,
                    let plist = obj["plist"] as? String,
@@ -2105,9 +2127,11 @@ struct DownloadView: View {
                         return
                     }
                 }
+                DispatchQueue.main.async { self.uploadProgress = nil }
                 signMessage = "安装服务未响应，请到「已签名」用全能签安装"
                 showSignResult = true
             } catch {
+                DispatchQueue.main.async { self.uploadProgress = nil }
                 signMessage = "无法连接安装服务器，请到「已签名」用全能签安装"
                 showSignResult = true
             }
@@ -2123,8 +2147,10 @@ struct DownloadView: View {
     }
 }
 
-// MARK: - 信任自签证书的 URLSession（连接用户自签证书的安装服务器）
-final class SelfSignedSessionDelegate: NSObject, URLSessionDelegate {
+// MARK: - 信任自签证书的 URLSession（连接用户自签证书的安装服务器，含上传进度）
+final class SelfSignedSessionDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
+    var onProgress: ((Double) -> Void)?
+
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
@@ -2133,6 +2159,12 @@ final class SelfSignedSessionDelegate: NSObject, URLSessionDelegate {
         } else {
             completionHandler(.performDefaultHandling, nil)
         }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        onProgress?(Double(totalBytesSent) / Double(totalBytesExpectedToSend))
     }
 }
 
