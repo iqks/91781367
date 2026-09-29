@@ -2312,9 +2312,9 @@ class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, Observ
         }
     }
 
-    /// 分批注入大字符串（600KB/块，快：回调直接续下一块，不额外派发线程）
+    /// 分批注入大字符串（1MB/块，快：回调直接续下一块，不额外派发线程）
     private func injectChunked(_ wv: WKWebView, varName: String, value: String, label: String, done: @escaping () -> Void) {
-        let chunk = 600_000
+        let chunk = 1_000_000
         let total = max(1, Int(ceil(Double(value.count) / Double(chunk))))
         var remaining = Substring(value)
         var block = 0
