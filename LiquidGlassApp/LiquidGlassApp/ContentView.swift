@@ -2231,7 +2231,8 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
         }
         let b64 = wasmData.base64EncodedString()
         await eval(webView, "void(window.ZSIGN_WASM_B64 = '')")
-        let chunk = 200_000
+        // 块大小与 JS 注入一致（15KB，iOS 上已实测可靠）；约 280 块，带进度显示
+        let chunk = 15_000
         var remaining = Substring(b64)
         var parts: [String] = []
         while !remaining.isEmpty {
@@ -2240,15 +2241,32 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
             remaining = remaining[end...]
         }
         for (i, part) in parts.enumerated() {
-            await eval(webView, "void(window.ZSIGN_WASM_B64 += '\(part)')")
-            logText = "签名核心注入中 (\(i + 1)/\(parts.count))…"
+            let ok = await eval(webView, "void(window.ZSIGN_WASM_B64 += '\(part)')", timeout: 10)
+            if !ok {
+                throw NSError(domain: "SignEngine", code: -8, userInfo: [NSLocalizedDescriptionKey: "签名数据注入超时（第 \(i + 1)/\(parts.count) 块）"])
+            }
+            if i % 20 == 19 || i == parts.count - 1 {
+                logText = "签名核心注入中 (\(i + 1)/\(parts.count))…"
+            }
         }
         logText = "签名核心注入完成"
     }
 
-    private func eval(_ webView: WKWebView, _ js: String) async {
+    private func eval(_ webView: WKWebView, _ js: String, timeout: TimeInterval = 15) async -> Bool {
         await withCheckedContinuation { c in
-            webView.evaluateJavaScript(js) { _, _ in c.resume() }
+            var done = false
+            webView.evaluateJavaScript(js) { _, _ in
+                if !done {
+                    done = true
+                    c.resume(returning: true)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+                if !done {
+                    done = true
+                    c.resume(returning: false)
+                }
+            }
         }
     }
 
