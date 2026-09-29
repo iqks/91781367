@@ -40,9 +40,9 @@ function postResult(status, payload) {
 async function ensureModule() {
   if (signModule) return signModule;
   setStatus('正在加载签名核心…');
-  var wasmResp = await fetch('zsign-wasm.wasm');
-  if (!wasmResp.ok) throw new Error('无法加载 zsign-wasm.wasm: ' + wasmResp.status);
-  var wasmBinary = await wasmResp.arrayBuffer();
+  // 使用 Swift 注入的 base64 数据（WKWebView 内 fetch 相对路径不可用）
+  if (!window.ZSIGN_WASM_B64) throw new Error('签名核心数据缺失');
+  var wasmBinary = b64ToU8(window.ZSIGN_WASM_B64);
   signModule = await createZsignModule({ wasmBinary: wasmBinary });
   return signModule;
 }

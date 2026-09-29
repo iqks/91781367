@@ -2281,6 +2281,8 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
             throw NSError(domain: "SignEngine", code: -7, userInfo: [NSLocalizedDescriptionKey: "签名代码执行失败（引擎未就绪）"])
         }
         logText = "签名代码就绪"
+        // 等 3 秒，让渲染进程消化完 280KB 代码的执行（否则立即注入数据会挂起）
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
     }
 
     /// 分块注入 wasm base64，避免单次传超大字符串导致失败
@@ -2311,7 +2313,16 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
             // 每块间隔 40ms，给 iOS WebKit 喘息时间，避免连续注入挂起
             try? await Task.sleep(nanoseconds: 40_000_000)
         }
-        logText = "签名核心注入完成"
+        // 验证注入完整性（wasm 2448620 B → base64 长度应为 3264828）
+        let len: Int = await withCheckedContinuation { c in
+            webView.evaluateJavaScript("window.ZSIGN_WASM_B64.length") { r, _ in
+                c.resume(returning: (r as? Int) ?? 0)
+            }
+        }
+        if len < 3000000 {
+            throw NSError(domain: "SignEngine", code: -9, userInfo: [NSLocalizedDescriptionKey: "签名数据注入不完整（\(len)/3264828）"])
+        }
+        logText = "签名核心注入完成 (\(len) 字符)"
     }
 
     private func eval(_ webView: WKWebView, _ js: String, timeout: TimeInterval = 15) async -> Bool {
