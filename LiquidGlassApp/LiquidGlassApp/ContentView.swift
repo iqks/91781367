@@ -2055,9 +2055,8 @@ struct DownloadView: View {
                 showInstallPrompt = true           // 自动弹出安装确认框
                 filter = "已签名"
             } catch {
-                showSignSheet = false
-                signMessage = "签名失败：\(error.localizedDescription)"
-                showSignResult = true
+                // 不关闭签名页：把具体错误直接显示在签名日志里，方便看到卡在哪一步、错在哪个 JS
+                signEngine.logText = "签名失败：\n\(error.localizedDescription)"
             }
         }
     }
