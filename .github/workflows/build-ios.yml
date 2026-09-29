@@ -29,9 +29,9 @@ jobs:
           WORK="$GITHUB_WORKSPACE/LiquidGlassApp/LiquidGlassApp/NativeSign"
           mkdir -p "$WORK/thirdparty/lib" "$WORK/thirdparty/include"
           mkdir -p /tmp/osl && cd /tmp/osl
-          curl -sL --retry 5 -o openssl.tar.gz https://github.com/openssl/openssl/archive/refs/tags/openssl-3.1.7.tar.gz
+          curl -sL --retry 5 -o openssl.tar.gz https://github.com/openssl/openssl/archive/refs/tags/OpenSSL_1_1_1w.tar.gz
           tar -xzf openssl.tar.gz
-          cd openssl-openssl-3.1.7
+          cd openssl-OpenSSL_1_1_1w
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           export CROSS_TOP="$(dirname "$(dirname "$SDK_PATH")")"
           export CROSS_SDK="$(basename "$SDK_PATH")"

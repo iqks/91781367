@@ -21,7 +21,6 @@
 #include <openssl/cms.h>
 #include <openssl/ocsp.h>
 #include <openssl/err.h>
-#include <openssl/provider.h>
 #include <openssl/x509v3.h>
 #include <ctime>
 
@@ -261,8 +260,6 @@ static X509* LoadFromP12(const string& data, const string& password, STACK_OF(X5
 {
 	BIO* bio = BIO_new_mem_buf(data.data(), (int)data.size());
 	if (!bio) return NULL;
-	OSSL_PROVIDER_load(NULL, "default");
-	OSSL_PROVIDER_load(NULL, "legacy");
 	ERR_clear_error();
 	PKCS12* p12 = d2i_PKCS12_bio(bio, NULL);
 	BIO_free(bio);
