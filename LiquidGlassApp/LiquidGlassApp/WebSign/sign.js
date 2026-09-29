@@ -8,6 +8,12 @@ var signBusy = false;
 function setStatus(text) {
   var el = document.getElementById('status');
   if (el) el.textContent = text;
+  // 同时把进度通过消息通道上报，Swift 侧实时显示（JavaScriptCore 环境下同样有效）
+  try {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.signResult) {
+      window.webkit.messageHandlers.signResult.postMessage({ status: 'log', payload: text });
+    }
+  } catch (e) {}
 }
 
 function b64ToU8(b64) {
