@@ -2243,6 +2243,9 @@ class SignEngine: ObservableObject {
             }
             setLog("正在加载 \(nm)…")
             context.evaluateScript(t)
+            if let exc = context.exception {
+                throw NSError(domain: "SignEngine", code: -12, userInfo: [NSLocalizedDescriptionKey: "\(nm) 执行失败：\(exc.toString() ?? "未知JS错误")"])
+            }
         }
         setLog("签名引擎就绪")
         // 注入 wasm base64（分块 100KB，JavaScriptCore 直接执行）
@@ -2250,12 +2253,18 @@ class SignEngine: ObservableObject {
         let b64 = wasmData.base64EncodedString()
         let totalBlocks = Int(ceil(Double(b64.count) / 100000.0))
         context.evaluateScript("window.ZSIGN_WASM_B64 = ''")
+        if let exc = context.exception {
+            throw NSError(domain: "SignEngine", code: -13, userInfo: [NSLocalizedDescriptionKey: "签名核心初始化失败：\(exc.toString() ?? "")"])
+        }
         var remaining = Substring(b64)
         var block = 0
         while !remaining.isEmpty {
             let end = remaining.index(remaining.startIndex, offsetBy: min(100_000, remaining.count), limitedBy: remaining.endIndex) ?? remaining.endIndex
             let part = String(remaining[remaining.startIndex..<end])
             context.evaluateScript("window.ZSIGN_WASM_B64 += '" + part + "'")
+            if let exc = context.exception {
+                throw NSError(domain: "SignEngine", code: -13, userInfo: [NSLocalizedDescriptionKey: "签名核心注入失败（第 \(block + 1) 块）：\(exc.toString() ?? "")"])
+            }
             remaining = remaining[end...]
             block += 1
             if block % 5 == 0 || remaining.isEmpty {
@@ -2270,7 +2279,11 @@ class SignEngine: ObservableObject {
         let provB64 = try Data(contentsOf: provURL).base64EncodedString()
         setLog("正在签名（可能需要十几秒）…")
         context.evaluateScript("void signIpaStart('\(ipaB64)', '\(p12B64)', '\(provB64)', '\(password)')")
-        // 轮询完成（最长 240 秒；每次 evaluateScript("") 推进 Promise/microtask 队列）
+        if let exc = context.exception {
+            throw NSError(domain: "SignEngine", code: -11, userInfo: [NSLocalizedDescriptionKey: "签名启动失败：\(exc.toString() ?? "未知JS错误")"])
+        }
+        // 轮询完成（最长 240 秒；每次 evaluateScript 推进 Promise/microtask 队列）
+        var pollTick = 0
         for _ in 0..<2400 {
             if let done = context.objectForKeyedSubscript("__SIGN_DONE"), !done.isUndefined, !done.isNull {
                 let status = done.objectForKeyedSubscript("status").toString() ?? ""
@@ -2289,9 +2302,14 @@ class SignEngine: ObservableObject {
                 if !msg.isEmpty { setLog(msg) }
             }
             Thread.sleep(forTimeInterval: 0.1)
-            context.evaluateScript("")
+            // 推进 microtask：非空脚本 + 周期注入已解决 Promise 强制驱动 then 链
+            context.evaluateScript("void 0")
+            pollTick += 1
+            if pollTick % 5 == 0 {
+                context.evaluateScript("Promise.resolve().then(function(){})")
+            }
         }
-        throw NSError(domain: "SignEngine", code: -5, userInfo: [NSLocalizedDescriptionKey: "签名超时"])
+        throw NSError(domain: "SignEngine", code: -5, userInfo: [NSLocalizedDescriptionKey: "签名超时（240秒）"])
     }
 
     private func setLog(_ text: String) {
