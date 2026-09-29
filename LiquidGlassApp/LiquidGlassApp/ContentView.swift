@@ -2191,7 +2191,7 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
         logText = "正在初始化签名核心…"
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
             pendingContinuation = cont
-            let js = "signIpaStart('\(ipaB64)', '\(p12B64)', '\(provB64)', '\(password)')"
+            let js = "void signIpaStart('\(ipaB64)', '\(p12B64)', '\(provB64)', '\(password)')"
             webView.evaluateJavaScript(js) { _, err in
                 if let err = err {
                     cont.resume(throwing: err)
@@ -2257,16 +2257,18 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
         }
         var exprs: [String] = []
         for (i, part) in parts.enumerated() {
-            exprs.append("window.__p\(i) = \"\(part)\"")
+            exprs.append("void(window.__p\(i) = \"\(part)\")")
         }
-        exprs.append("window.__full = " + parts.indices.map { "__p\($0)" }.joined(separator: " + "))
-        exprs.append("eval(window.__full)")
+        exprs.append("void(window.__full = " + parts.indices.map { "__p\($0)" }.joined(separator: " + ") + ")")
+        exprs.append("void eval(window.__full)")
+        exprs.append("typeof signIpaStart !== 'undefined' ? 'READY' : 'NO'")
         for (i, ex) in exprs.enumerated() {
             await eval(webView, ex)
             if i < exprs.count - 1 && (i % 6 == 0 || i == exprs.count - 2) {
                 logText = "签名代码注入中 (\(i + 1)/\(exprs.count))…"
             }
         }
+        logText = "签名代码注入完成"
     }
 
     /// 分块注入 wasm base64，避免单次传超大字符串导致失败
@@ -2276,8 +2278,8 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
             throw NSError(domain: "SignEngine", code: -4, userInfo: [NSLocalizedDescriptionKey: "签名核心文件缺失"])
         }
         let b64 = wasmData.base64EncodedString()
-        await eval(webView, "window.ZSIGN_WASM_B64 = ''")
-        let chunk = 400_000
+        await eval(webView, "void(window.ZSIGN_WASM_B64 = '')")
+        let chunk = 200_000
         var remaining = Substring(b64)
         var parts: [String] = []
         while !remaining.isEmpty {
@@ -2286,7 +2288,7 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
             remaining = remaining[end...]
         }
         for (i, part) in parts.enumerated() {
-            await eval(webView, "window.ZSIGN_WASM_B64 += '\(part)'")
+            await eval(webView, "void(window.ZSIGN_WASM_B64 += '\(part)')")
             logText = "签名核心注入中 (\(i + 1)/\(parts.count))…"
         }
         logText = "签名核心注入完成"
