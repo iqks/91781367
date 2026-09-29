@@ -36,7 +36,7 @@ jobs:
           export CROSS_TOP="$(dirname "$(dirname "$SDK_PATH")")"
           export CROSS_SDK="$(basename "$SDK_PATH")"
           set -o pipefail
-          ./Configure ios64-cross no-shared no-asm no-engine no-dso no-tests no-docs --prefix="$(pwd)/out" 2>&1 | tee /tmp/openssl_build.log | tail -40
+          ./Configure ios64-cross no-shared no-asm no-engine no-dso no-tests --prefix="$(pwd)/out" 2>&1 | tee /tmp/openssl_build.log | tail -40
           make -j4 2>&1 | tee -a /tmp/openssl_build.log | tail -40
           ls -la libcrypto.a
           cp libcrypto.a "$WORK/thirdparty/lib/"
