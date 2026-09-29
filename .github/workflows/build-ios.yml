@@ -29,14 +29,15 @@ jobs:
           WORK="$GITHUB_WORKSPACE/LiquidGlassApp/LiquidGlassApp/NativeSign"
           mkdir -p "$WORK/thirdparty/lib" "$WORK/thirdparty/include"
           mkdir -p /tmp/osl && cd /tmp/osl
-          curl -sL --retry 5 -o openssl.tar.gz https://github.com/openssl/openssl/archive/refs/tags/openssl-3.0.16.tar.gz
+          curl -sL --retry 5 -o openssl.tar.gz https://github.com/openssl/openssl/archive/refs/tags/openssl-3.1.7.tar.gz
           tar -xzf openssl.tar.gz
-          cd openssl-openssl-3.0.16
+          cd openssl-openssl-3.1.7
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           export CROSS_TOP="$(dirname "$(dirname "$SDK_PATH")")"
           export CROSS_SDK="$(basename "$SDK_PATH")"
-          ./Configure ios64-cross no-shared no-asm no-engine no-dso no-tests no-docs --prefix="$(pwd)/out"
-          make -j4
+          set -o pipefail
+          ./Configure ios64-cross no-shared no-asm no-engine no-dso no-tests no-docs --prefix="$(pwd)/out" 2>&1 | tee /tmp/openssl_build.log | tail -40
+          make -j4 2>&1 | tee -a /tmp/openssl_build.log | tail -40
           ls -la libcrypto.a
           cp libcrypto.a "$WORK/thirdparty/lib/"
           cp -R include/openssl "$WORK/thirdparty/include/"
@@ -89,7 +90,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-error-log
-          path: /tmp/build.log
+          path: |
+            /tmp/build.log
+            /tmp/openssl_build.log
 
       - name: 手动打包为未签名 IPA
         run: |
