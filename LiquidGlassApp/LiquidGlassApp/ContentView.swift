@@ -2502,8 +2502,67 @@ struct SettingsView: View {
                     Toggle("深色模式", isOn: $darkMode)
                         .tint(.blue)
                 }
+                Section("签名诊断") {
+                    NavigationLink {
+                        SignDiagnosticsView()
+                    } label: {
+                        Label("签名引擎日志", systemImage: "doc.text.magnifyingglass")
+                    }
+                    Text("签名闪退后打开这里，复制日志发给开发者")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .navigationTitle("设置")
+        }
+    }
+}
+
+/// 签名引擎诊断日志：签名闪退后重开 App 在这里查看
+struct SignDiagnosticsView: View {
+    @State private var logText = "读取中…"
+    @State private var copied = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                Text(logText)
+                    .font(.system(.footnote, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .textSelection(.enabled)
+            }
+            .background(Color(.systemGroupedBackground))
+            Divider()
+            HStack {
+                Button {
+                    UIPasteboard.general.string = logText
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                } label: {
+                    Label(copied ? "已复制" : "复制日志", systemImage: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderedProminent)
+                Spacer()
+                Button("刷新") {
+                    loadLog()
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding()
+        }
+        .navigationTitle("签名引擎日志")
+        .onAppear { loadLog() }
+    }
+
+    private func loadLog() {
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let logPath = docs.appendingPathComponent("zsign_debug.log")
+        if let data = try? Data(contentsOf: logPath), let str = String(data: data, encoding: .utf8), !str.isEmpty {
+            logText = str
+        } else {
+            logText = "暂无日志。\n\n请到首页/下载页签一次名（让它闪退），再回来这里查看。"
         }
     }
 }
