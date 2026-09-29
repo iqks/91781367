@@ -46,10 +46,13 @@ function postResult(status, payload) {
 async function ensureModule() {
   if (signModule) return signModule;
   setStatus('正在加载签名核心…');
-  // 使用 Swift 注入的 base64 数据（WKWebView 内 fetch 相对路径不可用）
-  if (!window.ZSIGN_WASM_B64) throw new Error('签名核心数据缺失');
-  var wasmBinary = b64ToU8(window.ZSIGN_WASM_B64);
-  signModule = await createZsignModule({ wasmBinary: wasmBinary });
+  if (window.ZSIGN_WASM_B64) {
+    var wasmBinary = b64ToU8(window.ZSIGN_WASM_B64);
+    signModule = await createZsignModule({ wasmBinary: wasmBinary });
+  } else {
+    // 自定义 scheme（appsign://）环境下可直接 fetch 包内 wasm
+    signModule = await createZsignModule();
+  }
   return signModule;
 }
 
@@ -60,6 +63,11 @@ async function signIpaStart(ipaB64, p12B64, provB64, password) {
   }
   signBusy = true;
   try {
+    // 支持 Swift 分批注入到 window 的变量（大 IPA 不直接拼进调用）
+    if (ipaB64 === undefined && window.__IPA_B64) ipaB64 = window.__IPA_B64;
+    if (p12B64 === undefined && window.__P12_B64) p12B64 = window.__P12_B64;
+    if (provB64 === undefined && window.__PROV_B64) provB64 = window.__PROV_B64;
+    if (!ipaB64 || !p12B64 || !provB64) throw new Error('签名数据缺失');
     setStatus('正在解压 IPA…');
     var ipaBytes = b64ToU8(ipaB64);
     var zip = await JSZip.loadAsync(ipaBytes);

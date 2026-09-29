@@ -2172,216 +2172,180 @@ struct WebBrowserView: UIViewRepresentable {
 }
 
 // MARK: - 签名引擎（内置 WebView 运行 zsign-wasm 真签名）
-class SignEngine: ObservableObject {
+class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, ObservableObject {
     @Published var logText = "签名引擎未启动"
+    private var webView: WKWebView?
+    private var resume: ((Result<Data, Error>) -> Void)?
+    private var ipaURL: URL?
+    private var p12URL: URL?
+    private var provURL: URL?
+    private var password = ""
+    private var started = false
 
-    /// 用系统 JavaScript 引擎（JavaScriptCore）直接跑签名，绕开 WKWebView 渲染进程繁忙/冻结问题
+    /// 用 WKWebView 跑签名：资源全部走自定义 scheme（appsign://）从 App 包原生加载，
+    /// 不再注入大字符串（注入 2.4MB 数据是之前渲染进程卡死的根因），同时 WKWebView 支持 WebAssembly。
     func sign(ipaURL: URL, p12URL: URL, provURL: URL, password: String) async throws -> Data {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let data = try self.runSignJS(ipaURL: ipaURL, p12URL: p12URL, provURL: provURL, password: password)
-                    cont.resume(returning: data)
-                } catch {
-                    cont.resume(throwing: error)
+            resume = { r in
+                switch r {
+                case .success(let d): cont.resume(returning: d)
+                case .failure(let e): cont.resume(throwing: e)
                 }
+            }
+            DispatchQueue.main.async {
+                self.ipaURL = ipaURL
+                self.p12URL = p12URL
+                self.provURL = provURL
+                self.password = password
+                self.startWebView()
             }
         }
     }
 
-    private func runSignJS(ipaURL: URL, p12URL: URL, provURL: URL, password: String) throws -> Data {
-        guard let wasmURL = Bundle.main.url(forResource: "zsign-wasm", withExtension: "wasm") else {
-            throw NSError(domain: "SignEngine", code: -4, userInfo: [NSLocalizedDescriptionKey: "签名核心文件缺失"])
+    private func startWebView() {
+        setLog("正在启动签名引擎…")
+        let config = WKWebViewConfiguration()
+        config.setURLSchemeHandler(AppSchemeHandler(), forURLScheme: AppSchemeHandler.scheme)
+        config.userContentController.add(self, name: "signResult")
+        let wv = WKWebView(frame: .zero, configuration: config)
+        wv.navigationDelegate = self
+        webView = wv
+        let html = """
+        <!DOCTYPE html><html><head><meta charset="utf-8">
+        <style>body{font-family:-apple-system;padding:16px;color:#333}#status{white-space:pre-wrap;font-size:14px}</style>
+        </head><body><div id="status">加载中…</div>
+        <script src="appsign://bundle/jszip.min.js"></script>
+        <script src="appsign://bundle/zsign-wasm.js"></script>
+        <script src="appsign://bundle/sign.js"></script>
+        </body></html>
+        """
+        wv.loadHTMLString(html, baseURL: URL(string: "\(AppSchemeHandler.scheme)://bundle/"))
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard !started else { return }
+        started = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.launchSign()
         }
-        let context = JSContext()!
-        // 浏览器环境模拟（JavaScriptCore 无 DOM，提供 sign.js / emscripten 依赖的最小全局对象）
-        context.evaluateScript("""
-        var window = globalThis;
-        var self = globalThis;
-        var document = {
-          getElementById: function() { return null; },
-          createElement: function(tag) {
-            return {
-              tagName: tag, nodeType: 1,
-              setAttribute: function() {}, removeAttribute: function() {},
-              appendChild: function() { return null; }, removeChild: function() {},
-              insertBefore: function() {}, addEventListener: function() {},
-              removeEventListener: function() {}, getAttribute: function() { return null; },
-              style: {}, src: '', text: '', innerHTML: '', value: '', onload: null, onerror: null,
-              parentNode: null, children: [], childNodes: []
-            };
-          },
-          createElementNS: function(ns, tag) { return document.createElement(tag); },
-          createTextNode: function(t) { return { nodeType: 3, textContent: t, nodeValue: t }; },
-          head: { appendChild: function() {} }, body: { appendChild: function() {} },
-          documentElement: { appendChild: function() {}, style: {} },
-          getElementsByTagName: function() { return []; },
-          querySelector: function() { return null; }, querySelectorAll: function() { return []; },
-          addEventListener: function() {}, removeEventListener: function() {},
-          readyState: 'complete'
-        };
-        window.document = document;
-        var navigator = { userAgent: 'signhelper' };
-        window.navigator = navigator;
-        var location = { href: 'app://local' };
-        window.location = location;
-        var console = { log: function(){}, warn: function(){}, error: function(){} };
-        window.console = console;
-        var webkit = { messageHandlers: { signResult: { postMessage: function(m) {
-          if (m && (m.status === 'success' || m.status === 'error')) {
-            window.__SIGN_DONE = m;
-          } else {
-            if (window.__SIGN_LOGS === undefined) window.__SIGN_LOGS = [];
-            window.__SIGN_LOGS.push(m);
-            window.__SIGN_LAST = m;
-          }
-        } } } };
-        window.webkit = webkit;
-        if (typeof performance === 'undefined') {
-          var performance = { now: function() { return Date.now(); } };
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        finishFailure(error)
+    }
+
+    private func launchSign() {
+        guard let wv = webView, let ipa = ipaURL, let p12 = p12URL, let prov = provURL else {
+            finishFailure(NSError(domain: "SignEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "缺少签名输入"]))
+            return
         }
-        window.performance = performance;
-        if (typeof crypto === 'undefined') {
-          var crypto = { getRandomValues: function(arr) {
-            for (var i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
-            return arr;
-          } };
-        }
-        window.crypto = crypto;
-        if (typeof atob === 'undefined') {
-          atob = function(s) {
-            var b = {}; var a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-            for (var i = 0; i < a.length; i++) b[a[i]] = i;
-            s = String(s).replace(/=+$/, '');
-            var o = '';
-            for (var i = 0; i < s.length; i += 4) {
-              var c1 = b[s[i]], c2 = b[s[i+1]], c3 = b[s[i+2]], c4 = b[s[i+3]];
-              if (c1 === undefined || c2 === undefined) break;
-              o += String.fromCharCode((c1 << 2) | (c2 >> 4));
-              if (c3 !== undefined) o += String.fromCharCode(((c2 & 15) << 4) | (c3 >> 2));
-              if (c4 !== undefined) o += String.fromCharCode(((c3 & 3) << 6) | c4);
-            }
-            return o;
-          };
-        }
-        if (typeof btoa === 'undefined') {
-          btoa = function(s) {
-            var a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-            var o = '';
-            for (var i = 0; i < s.length; i += 3) {
-              var c1 = s.charCodeAt(i), c2 = i+1 < s.length ? s.charCodeAt(i+1) : NaN, c3 = i+2 < s.length ? s.charCodeAt(i+2) : NaN;
-              o += a[c1 >> 2];
-              o += a[((c1 & 3) << 4) | (c2 >> 4) || 0];
-              o += isNaN(c2) ? '=' : a[((c2 & 15) << 2) | (c3 >> 6) || 0];
-              o += isNaN(c3) ? '=' : a[c3 & 63];
-            }
-            return o;
-          };
-        }
-        if (typeof TextEncoder === 'undefined') {
-          TextEncoder = function() {};
-          TextEncoder.prototype.encode = function(s) {
-            var u = unescape(encodeURIComponent(s));
-            var a = new Uint8Array(u.length);
-            for (var i = 0; i < u.length; i++) a[i] = u.charCodeAt(i);
-            return a;
-          };
-        }
-        if (typeof TextDecoder === 'undefined') {
-          TextDecoder = function() {};
-          TextDecoder.prototype.decode = function(a) {
-            var s = '';
-            for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]);
-            return decodeURIComponent(escape(s));
-          };
-        }
-        """)
-        // 注入三个 JS 库（JavaScriptCore 直接解析，无渲染进程瓶颈）
-        for nm in ["jszip.min.js", "zsign-wasm.js", "sign.js"] {
-            let base = (nm as NSString).deletingPathExtension
-            let ext = (nm as NSString).pathExtension
-            guard let u = Bundle.main.url(forResource: base, withExtension: ext),
-                  let t = try? String(contentsOf: u, encoding: .utf8) else {
-                throw NSError(domain: "SignEngine", code: -6, userInfo: [NSLocalizedDescriptionKey: "签名代码缺失：\(nm)"])
-            }
-            setLog("正在加载 \(nm)…")
-            context.evaluateScript(t)
-            if let exc = context.exception {
-                throw NSError(domain: "SignEngine", code: -12, userInfo: [NSLocalizedDescriptionKey: "\(nm) 执行失败：\(exc.toString() ?? "未知JS错误")"])
-            }
-        }
-        setLog("签名引擎就绪")
-        // 注入 wasm base64（分块 100KB，JavaScriptCore 直接执行）
-        let wasmData = try Data(contentsOf: wasmURL)
-        let b64 = wasmData.base64EncodedString()
-        let totalBlocks = Int(ceil(Double(b64.count) / 100000.0))
-        context.evaluateScript("window.ZSIGN_WASM_B64 = ''")
-        if let exc = context.exception {
-            throw NSError(domain: "SignEngine", code: -13, userInfo: [NSLocalizedDescriptionKey: "签名核心初始化失败：\(exc.toString() ?? "")"])
-        }
-        var remaining = Substring(b64)
-        var block = 0
-        while !remaining.isEmpty {
-            let end = remaining.index(remaining.startIndex, offsetBy: min(100_000, remaining.count), limitedBy: remaining.endIndex) ?? remaining.endIndex
-            let part = String(remaining[remaining.startIndex..<end])
-            context.evaluateScript("window.ZSIGN_WASM_B64 += '" + part + "'")
-            if let exc = context.exception {
-                throw NSError(domain: "SignEngine", code: -13, userInfo: [NSLocalizedDescriptionKey: "签名核心注入失败（第 \(block + 1) 块）：\(exc.toString() ?? "")"])
-            }
-            remaining = remaining[end...]
-            block += 1
-            if block % 5 == 0 || remaining.isEmpty {
-                setLog("签名核心加载中 (\(block)/\(totalBlocks))…")
-            }
-        }
-        setLog("签名核心加载完成")
-        // 读取 IPA / 证书 / 描述文件
-        setLog("正在读取 IPA 文件…")
-        let ipaB64 = try Data(contentsOf: ipaURL).base64EncodedString()
-        let p12B64 = try Data(contentsOf: p12URL).base64EncodedString()
-        let provB64 = try Data(contentsOf: provURL).base64EncodedString()
-        setLog("正在签名（可能需要十几秒）…")
-        context.evaluateScript("void signIpaStart('\(ipaB64)', '\(p12B64)', '\(provB64)', '\(password)')")
-        if let exc = context.exception {
-            throw NSError(domain: "SignEngine", code: -11, userInfo: [NSLocalizedDescriptionKey: "签名启动失败：\(exc.toString() ?? "未知JS错误")"])
-        }
-        // 轮询完成（最长 240 秒；每次 evaluateScript 推进 Promise/microtask 队列）
-        var pollTick = 0
-        for _ in 0..<2400 {
-            if let done = context.objectForKeyedSubscript("__SIGN_DONE"), !done.isUndefined, !done.isNull {
-                let status = done.objectForKeyedSubscript("status").toString() ?? ""
-                let payload = done.objectForKeyedSubscript("payload").toString() ?? ""
-                if status == "success" {
-                    if let data = Data(base64Encoded: payload) {
-                        setLog("签名完成")
-                        return data
+        do {
+            setLog("正在读取 IPA…")
+            let ipaB64 = try Data(contentsOf: ipa).base64EncodedString()
+            let p12B64 = try Data(contentsOf: p12).base64EncodedString()
+            let provB64 = try Data(contentsOf: prov).base64EncodedString()
+            setLog("正在注入签名数据…")
+            injectChunked(wv, varName: "__IPA_B64", value: ipaB64) {
+                self.injectChunked(wv, varName: "__P12_B64", value: p12B64) {
+                    self.injectChunked(wv, varName: "__PROV_B64", value: provB64) {
+                        wv.evaluateJavaScript("void window.signIpaStart(undefined, undefined, undefined, '\(self.password)')")
                     }
-                    throw NSError(domain: "SignEngine", code: -10, userInfo: [NSLocalizedDescriptionKey: "签名结果解析失败"])
                 }
-                throw NSError(domain: "SignEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "签名失败：\(payload)"])
             }
-            if let last = context.objectForKeyedSubscript("__SIGN_LAST"), !last.isUndefined, !last.isNull {
-                let msg = last.objectForKeyedSubscript("payload").toString() ?? ""
-                if !msg.isEmpty { setLog(msg) }
-            }
-            Thread.sleep(forTimeInterval: 0.1)
-            // 推进 microtask：非空脚本 + 周期注入已解决 Promise 强制驱动 then 链
-            context.evaluateScript("void 0")
-            pollTick += 1
-            if pollTick % 5 == 0 {
-                context.evaluateScript("Promise.resolve().then(function(){})")
-            }
+        } catch {
+            finishFailure(error)
         }
-        throw NSError(domain: "SignEngine", code: -5, userInfo: [NSLocalizedDescriptionKey: "签名超时（240秒）"])
+    }
+
+    /// 分批注入大字符串，避免单次 evaluateJavaScript 超限
+    private func injectChunked(_ wv: WKWebView, varName: String, value: String, done: @escaping () -> Void) {
+        let chunk = 300_000
+        wv.evaluateJavaScript("window.\(varName) = ''") { _, _ in
+            var remaining = Substring(value)
+            var block = 0
+            func next() {
+                if remaining.isEmpty {
+                    done()
+                    return
+                }
+                let end = remaining.index(remaining.startIndex, offsetBy: min(chunk, remaining.count), limitedBy: remaining.endIndex) ?? remaining.endIndex
+                let part = String(remaining[remaining.startIndex..<end])
+                remaining = remaining[end...]
+                block += 1
+                wv.evaluateJavaScript("window.\(varName) += '\(part)'") { _, _ in
+                    DispatchQueue.main.async { next() }
+                }
+            }
+            next()
+        }
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any] else { return }
+        let status = body["status"] as? String ?? ""
+        let payload = body["payload"] as? String ?? ""
+        if status == "log" {
+            setLog(payload)
+        } else if status == "success" {
+            if let data = Data(base64Encoded: payload) {
+                setLog("签名完成")
+                resume?(.success(data))
+                webView?.stopLoading()
+                webView = nil
+                started = false
+            } else {
+                finishFailure(NSError(domain: "SignEngine", code: -10, userInfo: [NSLocalizedDescriptionKey: "签名结果解析失败"]))
+            }
+        } else if status == "error" {
+            finishFailure(NSError(domain: "SignEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "签名失败：\(payload)"]))
+        }
     }
 
     private func setLog(_ text: String) {
         let t = text
-        DispatchQueue.main.async { self.logText = t }
+        DispatchQueue.main.async { [weak self] in self?.logText = t }
+    }
+
+    private func finishFailure(_ error: Error) {
+        setLog("签名失败：\(error.localizedDescription)")
+        resume?(.failure(error))
+        webView?.stopLoading()
+        webView = nil
+        started = false
     }
 }
 
-// MARK: - 签名日志视图（JavaScriptCore 引擎，无需 WKWebView）
+// MARK: - 自定义 URL Scheme：从 App 包内原生加载 JS/wasm（替代大字符串注入）
+final class AppSchemeHandler: NSObject, WKURLSchemeHandler {
+    static let scheme = "appsign"
+
+    func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
+        guard let url = task.request.url else {
+            task.didFailWithError(NSError(domain: "AppScheme", code: -1, userInfo: [NSLocalizedDescriptionKey: "无URL"]))
+            return
+        }
+        let name = url.lastPathComponent
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        guard let resURL = Bundle.main.url(forResource: base, withExtension: ext),
+              let data = try? Data(contentsOf: resURL) else {
+            task.didFailWithError(NSError(domain: "AppScheme", code: 404, userInfo: [NSLocalizedDescriptionKey: "未找到资源 \(name)"]))
+            return
+        }
+        var mime = "application/octet-stream"
+        if ext == "js" { mime = "application/javascript" }
+        if ext == "wasm" { mime = "application/wasm" }
+        if ext == "html" { mime = "text/html" }
+        let resp = URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: nil)
+        task.didReceive(resp)
+        task.didReceive(data)
+        task.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {}
+}
+
+// MARK: - 签名日志视图（WKWebView 引擎，显示实时签名日志）
 struct SignWebView: View {
     @ObservedObject var engine: SignEngine
 
