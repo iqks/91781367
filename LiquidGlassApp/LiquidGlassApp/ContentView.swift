@@ -2092,7 +2092,11 @@ struct DownloadView: View {
                 req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
                 req.setValue(name, forHTTPHeaderField: "X-Filename")
                 req.timeoutInterval = 180
-                let (respData, _) = try await URLSession.shared.upload(for: req, from: data)
+                let cfg = URLSessionConfiguration.ephemeral
+                cfg.timeoutIntervalForRequest = 180
+                cfg.timeoutIntervalForResource = 240
+                let session = URLSession(configuration: cfg, delegate: SelfSignedSessionDelegate(), delegateQueue: nil)
+                let (respData, _) = try await session.upload(for: req, from: data)
                 if let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
                    let ok = obj["ok"] as? Bool, ok,
                    let plist = obj["plist"] as? String,
@@ -2118,6 +2122,19 @@ struct DownloadView: View {
         guard let url = URL(string: t), url.scheme != nil else { return }
         browserURL = url
         showBrowser = true
+    }
+}
+
+// MARK: - 信任自签证书的 URLSession（连接用户自签证书的安装服务器）
+final class SelfSignedSessionDelegate: NSObject, URLSessionDelegate {
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
     }
 }
 
