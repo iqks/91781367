@@ -2053,9 +2053,9 @@ struct DownloadView: View {
                 pendingInstallURL = dest
                 pendingInstallName = name
                 filter = "已签名"
-                // 等签名页关闭动画结束再弹安装框，否则同一帧会被 SwiftUI 吞掉
+                // 不弹中间确认框：等签名页关闭动画结束后直接上传并弹系统安装框
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    self.showInstallPrompt = true
+                    self.installSignedIPA()
                 }
             } catch {
                 // 不关闭签名页：把具体错误直接显示在签名日志里，方便看到卡在哪一步、错在哪个 JS
@@ -2082,8 +2082,6 @@ struct DownloadView: View {
     private func installSignedIPA() {
         guard let url = pendingInstallURL else { return }
         let name = pendingInstallName
-        signMessage = "正在上传并准备安装…"
-        showSignResult = true
         Task {
             do {
                 let data = try Data(contentsOf: url)
@@ -2268,10 +2266,10 @@ class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, Observ
             let p12B64 = try Data(contentsOf: p12).base64EncodedString()
             let provB64 = try Data(contentsOf: prov).base64EncodedString()
             setLog("正在注入签名数据…")
-            injectChunked(wv, varName: "ZSIGN_WASM_B64", value: wasmB64) {
-                self.injectChunked(wv, varName: "__IPA_B64", value: ipaB64) {
-                    self.injectChunked(wv, varName: "__P12_B64", value: p12B64) {
-                        self.injectChunked(wv, varName: "__PROV_B64", value: provB64) {
+            injectChunked(wv, varName: "ZSIGN_WASM_B64", value: wasmB64, label: "正在注入签名核心") {
+                self.injectChunked(wv, varName: "__IPA_B64", value: ipaB64, label: "正在注入 IPA") {
+                    self.injectChunked(wv, varName: "__P12_B64", value: p12B64, label: "正在注入证书") {
+                        self.injectChunked(wv, varName: "__PROV_B64", value: provB64, label: "正在注入描述文件") {
                             wv.evaluateJavaScript("void window.signIpaStart(undefined, undefined, undefined, '\(self.password)')")
                         }
                     }
@@ -2282,9 +2280,10 @@ class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, Observ
         }
     }
 
-    /// 分批注入大字符串，避免单次 evaluateJavaScript 超限
-    private func injectChunked(_ wv: WKWebView, varName: String, value: String, done: @escaping () -> Void) {
+    /// 分批注入大字符串，避免单次 evaluateJavaScript 超限；每块显示进度，避免看起来像卡住
+    private func injectChunked(_ wv: WKWebView, varName: String, value: String, label: String, done: @escaping () -> Void) {
         let chunk = 300_000
+        let total = max(1, Int(ceil(Double(value.count) / Double(chunk))))
         wv.evaluateJavaScript("window.\(varName) = ''") { _, _ in
             var remaining = Substring(value)
             var block = 0
@@ -2297,6 +2296,7 @@ class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, Observ
                 let part = String(remaining[remaining.startIndex..<end])
                 remaining = remaining[end...]
                 block += 1
+                self.setLog("\(label) (\(block)/\(total))…")
                 wv.evaluateJavaScript("window.\(varName) += '\(part)'") { _, _ in
                     DispatchQueue.main.async { next() }
                 }
