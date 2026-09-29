@@ -31,3 +31,15 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "1.0"
+        SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/LiquidGlassApp/NativeSign/BridgingHeader.h"
+        CLANG_CXX_LANGUAGE_STANDARD: "c++11"
+        CLANG_CXX_LIBRARY: "libc++"
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/LiquidGlassApp/NativeSign/zsign/src"
+          - "$(SRCROOT)/LiquidGlassApp/NativeSign/zsign/src/common"
+          - "$(SRCROOT)/LiquidGlassApp/NativeSign/zsign/src/third-party/zlib"
+          - "$(SRCROOT)/LiquidGlassApp/NativeSign/thirdparty/include"
+        LIBRARY_SEARCH_PATHS:
+          - "$(SRCROOT)/LiquidGlassApp/NativeSign/thirdparty/lib"
+        OTHER_LDFLAGS:
+          - "-lcrypto"

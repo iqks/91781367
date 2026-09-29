@@ -24,6 +24,23 @@ jobs:
       - name: 安装 xcodegen（生成 Xcode 项目）
         run: brew install xcodegen
 
+      - name: 编译 OpenSSL（iOS arm64，原生签名引擎依赖）
+        run: |
+          cd LiquidGlassApp/LiquidGlassApp/NativeSign
+          mkdir -p thirdparty/lib thirdparty/include
+          curl -sL --retry 5 -o openssl.tar.gz https://github.com/openssl/openssl/archive/refs/tags/openssl-3.3.2.tar.gz
+          tar -xzf openssl.tar.gz
+          cd openssl-openssl-3.3.2
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          export CROSS_TOP="$(dirname "$(dirname "$SDK_PATH")")"
+          export CROSS_SDK="$(basename "$SDK_PATH")"
+          ./Configure ios64-cross no-shared no-asm no-engine no-dso no-tests no-docs --prefix="$(pwd)/out"
+          make -j4
+          ls -la libcrypto.a
+          cp libcrypto.a ../thirdparty/lib/
+          cp -R include/openssl ../thirdparty/include/
+          echo "OpenSSL OK"
+
       - name: 生成 Xcode 项目
         run: |
           cd LiquidGlassApp

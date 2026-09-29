@@ -2044,7 +2044,7 @@ struct DownloadView: View {
         showSignSheet = true
     }
 
-    /// 签名页出现后真正开始签名
+    /// 签名页出现后真正开始签名（优先原生 C++ 引擎，失败自动回退网页引擎）
     private func startActualSign() {
         guard let item = signTarget, let path = item.path else { return }
         guard let p12 = Bundle.main.url(forResource: "cert", withExtension: "p12"),
@@ -2055,28 +2055,84 @@ struct DownloadView: View {
             return
         }
         Task {
-            do {
-                let data = try await signEngine.sign(ipaURL: path, p12URL: p12, provURL: prov, password: "iosxb.cn")
+            signEngine.logText = "原生签名引擎就绪…\n正在签名…"
+            let (ok, outURL, errMsg) = await nativeSign(ipaPath: path, p12URL: p12, provURL: prov, password: "iosxb.cn")
+            if ok, let dest = outURL {
                 let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                     .appendingPathComponent("Signed", isDirectory: true)
                 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 let name = (item.name as NSString).deletingPathExtension + "_已签名.ipa"
-                let dest = dir.appendingPathComponent(name)
-                try data.write(to: dest)
-                let signed = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest)
+                let finalDest = dir.appendingPathComponent(name)
+                try? FileManager.default.removeItem(at: finalDest)
+                try? FileManager.default.moveItem(at: dest, to: finalDest)
+                let signed = DownloadManager.DownloadItem(name: name, url: finalDest, state: "done", progress: 1.0, path: finalDest)
                 downloader.signedItems.append(signed)
                 showSignSheet = false
-                pendingInstallURL = dest
+                pendingInstallURL = finalDest
                 pendingInstallName = name
                 filter = "已签名"
                 // 不弹中间确认框：签名页关闭动画很短，尽快上传并弹系统安装框
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     self.installSignedIPA()
                 }
-            } catch {
-                // 不关闭签名页：把具体错误直接显示在签名日志里，方便看到卡在哪一步、错在哪个 JS
-                signEngine.logText = "签名失败：\n\(error.localizedDescription)"
+            } else {
+                signEngine.logText = "原生签名失败：\(errMsg ?? "未知错误")\n正在回退网页签名引擎…"
+                await wasmFallbackSign(ipaPath: path, p12URL: p12, provURL: prov, item: item)
             }
+        }
+    }
+
+    /// 原生 zsign 签名（后台线程直接调 C 库，秒级完成）
+    private func nativeSign(ipaPath: URL, p12URL: URL, provURL: URL, password: String) async -> (Bool, URL?, String?) {
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let fm = FileManager.default
+                let tmp = fm.temporaryDirectory
+                let p12Tmp = tmp.appendingPathComponent("sign_cert.p12")
+                let provTmp = tmp.appendingPathComponent("sign_prov.mobileprovision")
+                let outTmp = tmp.appendingPathComponent("signed_out.ipa")
+                try? fm.removeItem(at: p12Tmp)
+                try? fm.removeItem(at: provTmp)
+                try? fm.removeItem(at: outTmp)
+                do {
+                    try fm.copyItem(at: p12URL, to: p12Tmp)
+                    try fm.copyItem(at: provURL, to: provTmp)
+                } catch {
+                    cont.resume(returning: (false, nil, "证书文件复制失败"))
+                    return
+                }
+                var err = [CChar](repeating: 0, count: 2048)
+                let rc = zsign_sign(ipaPath.path, outTmp.path, p12Tmp.path, password, provTmp.path, &err, 2048)
+                if rc == 0 {
+                    cont.resume(returning: (true, outTmp, nil))
+                } else {
+                    cont.resume(returning: (false, nil, String(cString: err)))
+                }
+            }
+        }
+    }
+
+    /// 网页 wasm 签名（原生签名失败时的回退路径）
+    private func wasmFallbackSign(ipaPath: URL, p12URL: URL, provURL: URL, item: DownloadManager.DownloadItem) async {
+        do {
+            let data = try await signEngine.sign(ipaURL: ipaPath, p12URL: p12URL, provURL: provURL, password: "iosxb.cn")
+            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Signed", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let name = (item.name as NSString).deletingPathExtension + "_已签名.ipa"
+            let dest = dir.appendingPathComponent(name)
+            try data.write(to: dest)
+            let signed = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest)
+            downloader.signedItems.append(signed)
+            showSignSheet = false
+            pendingInstallURL = dest
+            pendingInstallName = name
+            filter = "已签名"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                self.installSignedIPA()
+            }
+        } catch {
+            signEngine.logText = "签名失败：\n\(error.localizedDescription)"
         }
     }
 
