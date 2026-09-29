@@ -2053,8 +2053,8 @@ struct DownloadView: View {
                 pendingInstallURL = dest
                 pendingInstallName = name
                 filter = "已签名"
-                // 不弹中间确认框：等签名页关闭动画结束后直接上传并弹系统安装框
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                // 不弹中间确认框：签名页关闭动画很短，尽快上传并弹系统安装框
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     self.installSignedIPA()
                 }
             } catch {
@@ -2280,13 +2280,13 @@ class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, Observ
         }
     }
 
-    /// 分批注入大字符串，避免单次 evaluateJavaScript 超限；每块显示进度，避免看起来像卡住
+    /// 分批注入大字符串（600KB/块，快：回调直接续下一块，不额外派发线程）
     private func injectChunked(_ wv: WKWebView, varName: String, value: String, label: String, done: @escaping () -> Void) {
-        let chunk = 300_000
+        let chunk = 600_000
         let total = max(1, Int(ceil(Double(value.count) / Double(chunk))))
+        var remaining = Substring(value)
+        var block = 0
         wv.evaluateJavaScript("window.\(varName) = ''") { _, _ in
-            var remaining = Substring(value)
-            var block = 0
             func next() {
                 if remaining.isEmpty {
                     done()
@@ -2296,9 +2296,11 @@ class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, Observ
                 let part = String(remaining[remaining.startIndex..<end])
                 remaining = remaining[end...]
                 block += 1
-                self.setLog("\(label) (\(block)/\(total))…")
+                if block % 2 == 0 || remaining.isEmpty {
+                    self.setLog("\(label) (\(block)/\(total))…")
+                }
                 wv.evaluateJavaScript("window.\(varName) += '\(part)'") { _, _ in
-                    DispatchQueue.main.async { next() }
+                    next()
                 }
             }
             next()
