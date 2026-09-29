@@ -2235,20 +2235,25 @@ class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, Observ
     }
 
     private func launchSign() {
-        guard let wv = webView, let ipa = ipaURL, let p12 = p12URL, let prov = provURL else {
-            finishFailure(NSError(domain: "SignEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "缺少签名输入"]))
+        guard let wv = webView, let ipa = ipaURL, let p12 = p12URL, let prov = provURL,
+              let wasmURL = Bundle.main.url(forResource: "zsign-wasm", withExtension: "wasm") else {
+            finishFailure(NSError(domain: "SignEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "缺少签名输入或签名核心"]))
             return
         }
         do {
+            setLog("正在读取签名核心…")
+            let wasmB64 = try Data(contentsOf: wasmURL).base64EncodedString()
             setLog("正在读取 IPA…")
             let ipaB64 = try Data(contentsOf: ipa).base64EncodedString()
             let p12B64 = try Data(contentsOf: p12).base64EncodedString()
             let provB64 = try Data(contentsOf: prov).base64EncodedString()
             setLog("正在注入签名数据…")
-            injectChunked(wv, varName: "__IPA_B64", value: ipaB64) {
-                self.injectChunked(wv, varName: "__P12_B64", value: p12B64) {
-                    self.injectChunked(wv, varName: "__PROV_B64", value: provB64) {
-                        wv.evaluateJavaScript("void window.signIpaStart(undefined, undefined, undefined, '\(self.password)')")
+            injectChunked(wv, varName: "ZSIGN_WASM_B64", value: wasmB64) {
+                self.injectChunked(wv, varName: "__IPA_B64", value: ipaB64) {
+                    self.injectChunked(wv, varName: "__P12_B64", value: p12B64) {
+                        self.injectChunked(wv, varName: "__PROV_B64", value: provB64) {
+                            wv.evaluateJavaScript("void window.signIpaStart(undefined, undefined, undefined, '\(self.password)')")
+                        }
                     }
                 }
             }
