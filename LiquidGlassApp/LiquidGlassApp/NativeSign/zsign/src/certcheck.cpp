@@ -77,7 +77,7 @@ static int DaysRemaining(const ASN1_TIME* t)
 	return day;
 }
 
-static string GetNameField(const X509_NAME* name, int nid)
+static string GetNameField(X509_NAME* name, int nid)
 {
 	if (!name) return "";
 	int idx = X509_NAME_get_index_by_NID(name, nid, -1);

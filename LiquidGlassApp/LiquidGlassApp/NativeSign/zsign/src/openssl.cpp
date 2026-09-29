@@ -554,7 +554,7 @@ bool ZSignAsset::GetCertSubjectCN(void* pcert, string& strSubjectCN)
 
 	X509* cert = (X509*)pcert;
 
-	const X509_NAME* name = X509_get_subject_name(cert);
+	X509_NAME* name = X509_get_subject_name(cert);
 
 	int common_name_loc = X509_NAME_get_index_by_NID(name, NID_commonName, -1);
 	if (common_name_loc < 0) {
