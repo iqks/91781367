@@ -105,33 +105,6 @@ jobs:
           name: ios-unsigned-ipa
           path: LiquidGlassApp/build/LiquidGlassApp.ipa
 
-      - name: 编译模拟器版 App（iphonesimulator）
-        run: |
-          cd LiquidGlassApp
-          xcodebuild \
-            -project LiquidGlassApp.xcodeproj \
-            -scheme LiquidGlassApp \
-            -configuration Release \
-            -sdk iphonesimulator \
-            -derivedDataPath build \
-            -arch arm64 \
-            -arch x86_64 \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            build
-          ls -la build/Build/Products/Release-iphonesimulator/
-
-      - name: 上传模拟器版 App（.app）
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-simulator-app
-          path: LiquidGlassApp/build/Build/Products/Release-iphonesimulator/LiquidGlassApp.app
-
-      - name: 打包模拟器版 zip
-        run: |
-          cd LiquidGlassApp/build/Build/Products/Release-iphonesimulator
-          zip -r LiquidGlassApp_sim.zip LiquidGlassApp.app
-
       - name: 发布构建产物到 Releases（免登录下载）
         if: success()
         uses: actions/github-script@v7
@@ -145,8 +118,7 @@ jobs:
               body: '自动构建产物（免登录下载）'
             });
             const files = [
-              'LiquidGlassApp/build/LiquidGlassApp.ipa',
-              'LiquidGlassApp/build/Build/Products/Release-iphonesimulator/LiquidGlassApp_sim.zip'
+              'LiquidGlassApp/build/LiquidGlassApp.ipa'
             ];
             let uploaded = 0;
             for (const f of files) {
