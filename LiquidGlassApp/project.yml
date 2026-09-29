@@ -8,7 +8,9 @@ targets:
     type: application
     platform: iOS
     sources:
-      - LiquidGlassApp
+      - path: LiquidGlassApp
+        excludes:
+          - "NativeSign/thirdparty"
     info:
       path: LiquidGlassApp/Info.plist
       properties:
