@@ -2198,10 +2198,35 @@ class SignEngine: ObservableObject {
         context.evaluateScript("""
         var window = globalThis;
         var self = globalThis;
-        var document = { getElementById: function() { return null; } };
+        var document = {
+          getElementById: function() { return null; },
+          createElement: function(tag) {
+            return {
+              tagName: tag, nodeType: 1,
+              setAttribute: function() {}, removeAttribute: function() {},
+              appendChild: function() { return null; }, removeChild: function() {},
+              insertBefore: function() {}, addEventListener: function() {},
+              removeEventListener: function() {}, getAttribute: function() { return null; },
+              style: {}, src: '', text: '', innerHTML: '', value: '', onload: null, onerror: null,
+              parentNode: null, children: [], childNodes: []
+            };
+          },
+          createElementNS: function(ns, tag) { return document.createElement(tag); },
+          createTextNode: function(t) { return { nodeType: 3, textContent: t, nodeValue: t }; },
+          head: { appendChild: function() {} }, body: { appendChild: function() {} },
+          documentElement: { appendChild: function() {}, style: {} },
+          getElementsByTagName: function() { return []; },
+          querySelector: function() { return null; }, querySelectorAll: function() { return []; },
+          addEventListener: function() {}, removeEventListener: function() {},
+          readyState: 'complete'
+        };
+        window.document = document;
         var navigator = { userAgent: 'signhelper' };
+        window.navigator = navigator;
         var location = { href: 'app://local' };
+        window.location = location;
         var console = { log: function(){}, warn: function(){}, error: function(){} };
+        window.console = console;
         var webkit = { messageHandlers: { signResult: { postMessage: function(m) {
           if (m && (m.status === 'success' || m.status === 'error')) {
             window.__SIGN_DONE = m;
@@ -2211,8 +2236,47 @@ class SignEngine: ObservableObject {
             window.__SIGN_LAST = m;
           }
         } } } };
+        window.webkit = webkit;
         if (typeof performance === 'undefined') {
           var performance = { now: function() { return Date.now(); } };
+        }
+        window.performance = performance;
+        if (typeof crypto === 'undefined') {
+          var crypto = { getRandomValues: function(arr) {
+            for (var i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
+            return arr;
+          } };
+        }
+        window.crypto = crypto;
+        if (typeof atob === 'undefined') {
+          atob = function(s) {
+            var b = {}; var a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+            for (var i = 0; i < a.length; i++) b[a[i]] = i;
+            s = String(s).replace(/=+$/, '');
+            var o = '';
+            for (var i = 0; i < s.length; i += 4) {
+              var c1 = b[s[i]], c2 = b[s[i+1]], c3 = b[s[i+2]], c4 = b[s[i+3]];
+              if (c1 === undefined || c2 === undefined) break;
+              o += String.fromCharCode((c1 << 2) | (c2 >> 4));
+              if (c3 !== undefined) o += String.fromCharCode(((c2 & 15) << 4) | (c3 >> 2));
+              if (c4 !== undefined) o += String.fromCharCode(((c3 & 3) << 6) | c4);
+            }
+            return o;
+          };
+        }
+        if (typeof btoa === 'undefined') {
+          btoa = function(s) {
+            var a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+            var o = '';
+            for (var i = 0; i < s.length; i += 3) {
+              var c1 = s.charCodeAt(i), c2 = i+1 < s.length ? s.charCodeAt(i+1) : NaN, c3 = i+2 < s.length ? s.charCodeAt(i+2) : NaN;
+              o += a[c1 >> 2];
+              o += a[((c1 & 3) << 4) | (c2 >> 4) || 0];
+              o += isNaN(c2) ? '=' : a[((c2 & 15) << 2) | (c3 >> 6) || 0];
+              o += isNaN(c3) ? '=' : a[c3 & 63];
+            }
+            return o;
+          };
         }
         if (typeof TextEncoder === 'undefined') {
           TextEncoder = function() {};
