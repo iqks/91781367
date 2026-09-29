@@ -73,16 +73,33 @@ jobs:
               log = fs.readFileSync('/tmp/build.log', 'utf8').split('\n').slice(-500).join('\n');
             }
             const content = Buffer.from(log).toString('base64');
-            async function write(sha) {
-              const p = { owner: context.repo.owner, repo: context.repo.repo, path: 'errors/latest.log', message: '记录编译错误 [skip ci]', content: content };
+            async function write(sha, path, msg) {
+              const p = { owner: context.repo.owner, repo: context.repo.repo, path: path, message: msg, content: content };
               if (sha) p.sha = sha;
               await github.rest.repos.createOrUpdateFileContents(p);
             }
             try {
               const existing = await github.rest.repos.getContent({ owner: context.repo.owner, repo: context.repo.repo, path: 'errors/latest.log' });
-              await write(existing.data.sha);
+              await write(existing.data.sha, 'errors/latest.log', '记录编译错误 [skip ci]');
             } catch (e) {
-              await write(undefined);
+              await write(undefined, 'errors/latest.log', '记录编译错误 [skip ci]');
+            }
+            // OpenSSL 编译日志也提交到仓库（定位 Configure/make 失败原因）
+            let osl = 'empty';
+            if (fs.existsSync('/tmp/openssl_build.log')) {
+              osl = fs.readFileSync('/tmp/openssl_build.log', 'utf8').split('\n').slice(-800).join('\n');
+            }
+            const oslContent = Buffer.from(osl).toString('base64');
+            async function writeOsl(sha) {
+              const p = { owner: context.repo.owner, repo: context.repo.repo, path: 'errors/openssl_build.log', message: '记录 OpenSSL 编译日志 [skip ci]', content: oslContent };
+              if (sha) p.sha = sha;
+              await github.rest.repos.createOrUpdateFileContents(p);
+            }
+            try {
+              const existingOsl = await github.rest.repos.getContent({ owner: context.repo.owner, repo: context.repo.repo, path: 'errors/openssl_build.log' });
+              await writeOsl(existingOsl.data.sha);
+            } catch (e) {
+              await writeOsl(undefined);
             }
 
       - name: 上传编译日志（失败时排查用）
