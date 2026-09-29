@@ -2110,8 +2110,8 @@ struct DownloadView: View {
                 cfg.timeoutIntervalForRequest = 180
                 cfg.timeoutIntervalForResource = 240
                 let delegate = SelfSignedSessionDelegate()
-                delegate.onProgress = { [weak self] p in
-                    DispatchQueue.main.async { self?.uploadProgress = p }
+                delegate.onProgress = { p in
+                    DispatchQueue.main.async { self.uploadProgress = p }
                 }
                 let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
                 DispatchQueue.main.async { self.uploadProgress = 0.001 }
