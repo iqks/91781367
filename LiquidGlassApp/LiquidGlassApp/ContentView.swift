@@ -2211,6 +2211,8 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
             }
             if ok {
                 logText = "签名引擎已就绪"
+                // 等 300ms，让 WebKit 处理完 UserScript 的后遗症再注入数据
+                try? await Task.sleep(nanoseconds: 300_000_000)
                 return
             }
             waited += 1
@@ -2248,6 +2250,8 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
             if i % 20 == 19 || i == parts.count - 1 {
                 logText = "签名核心注入中 (\(i + 1)/\(parts.count))…"
             }
+            // 每块间隔 40ms，给 iOS WebKit 喘息时间，避免连续注入挂起
+            try? await Task.sleep(nanoseconds: 40_000_000)
         }
         logText = "签名核心注入完成"
     }
@@ -2261,7 +2265,9 @@ class SignEngine: NSObject, WKScriptMessageHandler, ObservableObject {
                     c.resume(returning: true)
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+            // 超时用后台线程计时：主线程即使被 WebKit 阻塞，超时仍能触发
+            Task.detached {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                 if !done {
                     done = true
                     c.resume(returning: false)
