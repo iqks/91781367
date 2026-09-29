@@ -2052,8 +2052,11 @@ struct DownloadView: View {
                 showSignSheet = false
                 pendingInstallURL = dest
                 pendingInstallName = name
-                showInstallPrompt = true           // 自动弹出安装确认框
                 filter = "已签名"
+                // 等签名页关闭动画结束再弹安装框，否则同一帧会被 SwiftUI 吞掉
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    self.showInstallPrompt = true
+                }
             } catch {
                 // 不关闭签名页：把具体错误直接显示在签名日志里，方便看到卡在哪一步、错在哪个 JS
                 signEngine.logText = "签名失败：\n\(error.localizedDescription)"
