@@ -648,9 +648,6 @@ struct UploadAppView: View {
                         .keyboardType(.URL)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
-                    Label("不限后缀，上传时会自动检测链接里能否下载 IPA", systemImage: "link")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 Section("上传时间") {
                     Text(HomeView.currentTimeString())
@@ -664,7 +661,7 @@ struct UploadAppView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(uploading ? "检测中…" : "上传") {
+                    Button("上传") {
                         guard !uploading else { return }
                         uploading = true
                         let finalName = name.trimmingCharacters(in: .whitespacesAndNewlines)
