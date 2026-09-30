@@ -2191,7 +2191,7 @@ struct DownloadView: View {
                     return zsign_ipa_info(p, &buf, &outLen)
                 }
                 if rc == 0, outLen > 0 {
-                    let data = Data(bytes: buf, count: outLen)
+                    let data = Data(bytes: buf, count: Int(outLen))
                     if let plist = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String: Any] {
                         name = (plist["CFBundleDisplayName"] as? String) ?? (plist["CFBundleName"] as? String) ?? name
                         version = (plist["CFBundleShortVersionString"] as? String) ?? ""
