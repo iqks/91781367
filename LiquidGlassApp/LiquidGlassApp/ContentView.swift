@@ -93,6 +93,7 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
         var state: String      // downloading / done / error
         var progress: Double
         var path: URL?
+        var installURL: String?   // 已签名上传后服务器返回的 itms-services 链接（点安装秒开，不再重复上传）
     }
 
     @Published var items: [DownloadItem] = []
@@ -143,7 +144,7 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
 
     func startDownload(url: URL) {
         let name = url.lastPathComponent.isEmpty ? "应用.ipa" : url.lastPathComponent
-        let item = DownloadItem(name: name, url: url, state: "downloading", progress: 0, path: nil)
+        let item = DownloadItem(name: name, url: url, state: "downloading", progress: 0, path: nil, installURL: nil)
         items.append(item)
         let task = session.downloadTask(with: url)
         taskMap[task] = item.id
@@ -2084,11 +2085,13 @@ struct DownloadView: View {
                 let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                     .appendingPathComponent("Signed", isDirectory: true)
                 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                let name = (item.name as NSString).deletingPathExtension + "_已签名.ipa"
-                let finalDest = dir.appendingPathComponent(name)
+                // 用 IPA 内的真实应用名（CFBundleDisplayName / CFBundleName），而不是文件名
+                let appName = readAppName(from: dest) ?? (item.name as NSString).deletingPathExtension
+                let displayName = appName + "_已签名"
+                let finalDest = dir.appendingPathComponent(displayName + ".ipa")
                 try? FileManager.default.removeItem(at: finalDest)
                 try? FileManager.default.moveItem(at: dest, to: finalDest)
-                let signed = DownloadManager.DownloadItem(name: name, url: finalDest, state: "done", progress: 1.0, path: finalDest)
+                let signed = DownloadManager.DownloadItem(name: displayName, url: finalDest, state: "done", progress: 1.0, path: finalDest, installURL: nil)
                 downloader.signedItems.append(signed)
                 showSignSheet = false
                 pendingInstallURL = finalDest
@@ -2142,10 +2145,11 @@ struct DownloadView: View {
             let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("Signed", isDirectory: true)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let name = (item.name as NSString).deletingPathExtension + "_已签名.ipa"
-            let dest = dir.appendingPathComponent(name)
+            let appName = readAppName(from: ipaPath) ?? (item.name as NSString).deletingPathExtension
+            let displayName = appName + "_已签名"
+            let dest = dir.appendingPathComponent(displayName + ".ipa")
             try data.write(to: dest)
-            let signed = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest)
+            let signed = DownloadManager.DownloadItem(name: displayName, url: dest, state: "done", progress: 1.0, path: dest, installURL: nil)
             downloader.signedItems.append(signed)
             showSignSheet = false
             pendingInstallURL = dest
@@ -2169,13 +2173,20 @@ struct DownloadView: View {
         let name = url.lastPathComponent
         let dest = dir.appendingPathComponent(name)
         try? FileManager.default.copyItem(at: url, to: dest)
-        let item = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest)
+        let item = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest, installURL: nil)
         withAnimation { downloader.items.append(item) }
     }
 
-    /// 签名完成：上传已签名 IPA 到服务器，弹出系统安装框（itms-services）
+    /// 签名完成：安装。优先用服务器已保存的安装链接（秒开），没有才重新上传
     private func installSignedIPA() {
         guard let url = pendingInstallURL else { return }
+        // 秒开：该已签名 IPA 之前上传过，服务器已有 plist，直接弹系统安装框
+        if let idx = downloader.signedItems.firstIndex(where: { $0.path == url }),
+           let cached = downloader.signedItems[idx].installURL,
+           let u = URL(string: cached) {
+            UIApplication.shared.open(u, options: [:]) { _ in }
+            return
+        }
         let name = pendingInstallName
         Task {
             do {
@@ -2196,6 +2207,10 @@ struct DownloadView: View {
                    let plist = obj["plist"] as? String,
                    let enc = plist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
                     let itms = "itms-services://?action=download-manifest&url=\(enc)"
+                    // 存起来：下次点安装直接秒开，不再上传
+                    if let idx = downloader.signedItems.firstIndex(where: { $0.path == url }) {
+                        downloader.signedItems[idx].installURL = itms
+                    }
                     if let u = URL(string: itms) {
                         UIApplication.shared.open(u, options: [:]) { _ in }
                         return
@@ -2208,6 +2223,19 @@ struct DownloadView: View {
                 showSignResult = true
             }
         }
+    }
+
+    /// 读 IPA 内 Payload/*.app/Info.plist 的真实应用名（原生 zsign_ipa_info）
+    private func readAppName(from ipaURL: URL) -> String? {
+        var buf = [CChar](repeating: 0, count: 2 * 1024 * 1024)
+        var len = Int32(buf.count)
+        let rc = zsign_ipa_info(ipaURL.path, &buf, &len)
+        guard rc == 0, len > 0 else { return nil }
+        let data = Data(bytes: buf, count: Int(len))
+        guard let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let dict = plist as? [String: Any] else { return nil }
+        if let n = dict["CFBundleDisplayName"] as? String, !n.isEmpty { return n }
+        return dict["CFBundleName"] as? String
     }
 
     /// 打开内置浏览器
