@@ -2185,7 +2185,7 @@ struct DownloadView: View {
                 var bundleId = ""
                 let cap = 2 * 1024 * 1024
                 var buf = [CChar](repeating: 0, count: cap)
-                var outLen = cap
+                var outLen = Int32(cap)
                 let rc = path.withUnsafeFileSystemRepresentation { ptr -> Int32 in
                     guard let p = ptr else { return -1 }
                     return zsign_ipa_info(p, &buf, &outLen)
