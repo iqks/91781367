@@ -26,11 +26,10 @@ jobs:
           curl -sL --retry 5 -o openssl.tar.gz https://github.com/openssl/openssl/archive/refs/tags/OpenSSL_1_1_1w.tar.gz
           tar -xzf openssl.tar.gz
           cd openssl-OpenSSL_1_1_1w
-          SDK_PATH=$(xcrun --sdk iphonesimulator --show-sdk-path)
-          export CROSS_TOP="$(dirname "$(dirname "$SDK_PATH")")"
-          export CROSS_SDK="$(basename "$SDK_PATH")"
           set -o pipefail
-          ./Configure ios-sim-cross no-shared no-asm no-engine no-dso no-tests --prefix="$(pwd)/out" 2>&1 | tee /tmp/osl_sim.log | tail -40
+          # 1.1.1w 没有 ios-sim-cross 目标；iOS 模拟器 app 本质是跑在 macOS 上的 x86_64 二进制，
+          # 用 darwin64-x86_64-cc 编出的 libcrypto.a 可直接链接进模拟器版
+          ./Configure darwin64-x86_64-cc no-shared no-asm no-engine no-dso no-tests --prefix="$(pwd)/out" 2>&1 | tee /tmp/osl_sim.log | tail -40
           make -j4 2>&1 | tee -a /tmp/osl_sim.log | tail -40
           ls -la libcrypto.a
           cp libcrypto.a "$WORK/thirdparty/lib/"
@@ -52,6 +51,8 @@ jobs:
             -configuration Release \
             -sdk iphonesimulator \
             -derivedDataPath build \
+            ARCHS=x86_64 \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build 2>&1 | tee /tmp/sim_build.log | tail -200
@@ -67,16 +68,28 @@ jobs:
               log = fs.readFileSync('/tmp/sim_build.log', 'utf8').split('\n').slice(-500).join('\n');
             }
             const content = Buffer.from(log).toString('base64');
-            async function write(sha, path, msg) {
-              const p = { owner: context.repo.owner, repo: context.repo.repo, path: path, message: msg, content: content };
+            async function write(sha, path, msg, c) {
+              const p = { owner: context.repo.owner, repo: context.repo.repo, path: path, message: msg, content: c };
               if (sha) p.sha = sha;
               await github.rest.repos.createOrUpdateFileContents(p);
             }
             try {
               const existing = await github.rest.repos.getContent({ owner: context.repo.owner, repo: context.repo.repo, path: 'errors/sim_latest.log' });
-              await write(existing.data.sha, 'errors/sim_latest.log', '记录模拟器编译错误 [skip ci]');
+              await write(existing.data.sha, 'errors/sim_latest.log', '记录模拟器编译错误 [skip ci]', content);
             } catch (e) {
-              await write(undefined, 'errors/sim_latest.log', '记录模拟器编译错误 [skip ci]');
+              await write(undefined, 'errors/sim_latest.log', '记录模拟器编译错误 [skip ci]', content);
+            }
+            // OpenSSL 编译日志也记录（定位 Configure/make 失败原因）
+            let osl = 'empty';
+            if (fs.existsSync('/tmp/osl_sim.log')) {
+              osl = fs.readFileSync('/tmp/osl_sim.log', 'utf8').split('\n').slice(-800).join('\n');
+            }
+            const oslContent = Buffer.from(osl).toString('base64');
+            try {
+              const existingOsl = await github.rest.repos.getContent({ owner: context.repo.owner, repo: context.repo.repo, path: 'errors/sim_openssl.log' });
+              await write(existingOsl.data.sha, 'errors/sim_openssl.log', '记录模拟器 OpenSSL 编译日志 [skip ci]', oslContent);
+            } catch (e) {
+              await write(undefined, 'errors/sim_openssl.log', '记录模拟器 OpenSSL 编译日志 [skip ci]', oslContent);
             }
 
       - name: 打包模拟器 App
