@@ -2095,7 +2095,7 @@ struct DownloadView: View {
                 downloader.signedItems.append(signed)
                 showSignSheet = false
                 pendingInstallURL = finalDest
-                pendingInstallName = name
+                pendingInstallName = displayName
                 filter = "已签名"
                 // 签名完成直接弹系统安装框
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -2153,7 +2153,7 @@ struct DownloadView: View {
             downloader.signedItems.append(signed)
             showSignSheet = false
             pendingInstallURL = dest
-            pendingInstallName = name
+            pendingInstallName = displayName
             filter = "已签名"
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 self.installSignedIPA()
