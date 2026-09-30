@@ -7,8 +7,11 @@
 #include "archive.h"
 #include "openssl.h"
 
+#include "third-party/minizip/unzip.h"
+
 #include <vector>
 #include <string>
+#include <cstring>
 
 // 诊断日志：写入 App Documents 沙盒，闪退后重开 App 即可读取
 static void zlog_debug(const char* fmt, ...) {
@@ -33,6 +36,49 @@ static void zlog_debug(const char* fmt, ...) {
         [fh writeData:data];
         [fh synchronizeFile];
         [fh closeFile];
+    }
+}
+
+// 读取 IPA 内 Payload/*.app/Info.plist 原始字节
+int zsign_ipa_info(const char* ipaPath, char* dataBuf, int* dataLen) {
+    @autoreleasepool {
+        if (!ipaPath || !dataBuf || !dataLen || *dataLen <= 0) return -1;
+        unzFile zf = unzOpen(ipaPath);
+        if (!zf) return -2;
+        int found = 0;
+        if (unzGoToFirstFile(zf) == UNZ_OK) {
+            do {
+                char name[1024];
+                if (unzGetCurrentFileInfo(zf, NULL, name, sizeof(name), NULL, 0, NULL, 0) == UNZ_OK) {
+                    std::string p = name;
+                    size_t n = p.size();
+                    // 匹配 Payload/xxx.app/Info.plist
+                    if (n > 12 && p.compare(0, 8, "Payload/") == 0 &&
+                        p.compare(n - 12, 12, ".app/Info.plist") == 0) {
+                        if (unzOpenCurrentFile(zf) == UNZ_OK) {
+                            int total = 0;
+                            char buf[65536];
+                            int r;
+                            int cap = *dataLen;
+                            while ((r = unzReadCurrentFile(zf, buf, sizeof(buf))) > 0) {
+                                int room = cap - total;
+                                if (room <= 0) break;
+                                int c = (r < room) ? r : room;
+                                memcpy(dataBuf + total, buf, c);
+                                total += c;
+                                if (total >= cap) break;
+                            }
+                            unzCloseCurrentFile(zf);
+                            *dataLen = total;
+                            found = 1;
+                            break;
+                        }
+                    }
+                }
+            } while (unzGoToNextFile(zf) == UNZ_OK);
+        }
+        unzClose(zf);
+        return found ? 0 : -3;
     }
 }
 

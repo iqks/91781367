@@ -1820,18 +1820,18 @@ struct DownloadView: View {
             .sheet(isPresented: $showSignSheet) {
                 NavigationStack {
                     VStack(spacing: 0) {
-                        SignWebView(engine: signEngine)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        HStack {
-                            Text(signEngine.logText)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            Spacer()
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 7) {
+                                ForEach(signEngine.logLines) { line in
+                                    Text(line.text)
+                                        .font(.system(size: line.size))
+                                        .foregroundStyle(line.color)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
                         }
-                        .padding(.horizontal)
-                        .padding(.vertical, 10)
-                        .background(.thinMaterial)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .navigationTitle("签名")
                     .navigationBarTitleDisplayMode(.inline)
@@ -2071,9 +2071,31 @@ struct DownloadView: View {
             return
         }
         Task {
-            signEngine.logText = "原生签名引擎就绪…\n正在签名…"
+            // 控制台日志：一行一行输出
+            signEngine.logLines = []
+            let appVer = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0"
+            signEngine.addLine("签名工具\"签名助手工具版本\"\(appVer)", size: 11, color: .secondary)
+            signEngine.addLine("系统版本 iOS \(UIDevice.current.systemVersion)", size: 11, color: .secondary)
+            signEngine.addLine("签名任务", size: 17, color: .green)
+            // 从 IPA 里读应用信息（应用名/版本/包名）
+            let info = await readIPAInfo(path: path)
+            signEngine.addLine("APP 名称\"\(info.name)\"", size: 14)
+            if !info.version.isEmpty {
+                signEngine.addLine("版本号 \(info.version)", size: 14)
+            }
+            if !info.bundleId.isEmpty {
+                signEngine.addLine("标识符 \(info.bundleId)", size: 14)
+            }
+            let sizeBytes = (try? path.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+            signEngine.addLine(String(format: "文件大小 %.1f MB", Double(sizeBytes) / 1048576.0), size: 14)
+            // 原生签名
+            signEngine.logText = "原生签名引擎就绪…"
+            let t0 = Date()
             let (ok, outURL, errMsg) = await nativeSign(ipaPath: path, p12URL: p12, provURL: prov, password: "iosxb.cn")
+            let elapsed = Date().timeIntervalSince(t0)
             if ok, let dest = outURL {
+                signEngine.addLine(String(format: "打包进程 · 总耗时 %.2f 秒", elapsed), size: 14, color: .green)
+                signEngine.addLine("签名成功", size: 17, color: .green)
                 let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                     .appendingPathComponent("Signed", isDirectory: true)
                 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -2087,12 +2109,12 @@ struct DownloadView: View {
                 pendingInstallURL = finalDest
                 pendingInstallName = name
                 filter = "已签名"
-                // 不弹中间确认框：签名页关闭动画很短，尽快上传并弹系统安装框
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                // 让用户看到绿色的"签名成功"后再弹安装框
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                     self.installSignedIPA()
                 }
             } else {
-                signEngine.logText = "原生签名失败：\(errMsg ?? "未知错误")\n正在回退网页签名引擎…"
+                signEngine.addLine("签名失败：\(errMsg ?? "未知错误")", size: 14, color: .red)
                 await wasmFallbackSign(ipaPath: path, p12URL: p12, provURL: prov, item: item)
             }
         }
@@ -2130,6 +2152,7 @@ struct DownloadView: View {
 
     /// 网页 wasm 签名（原生签名失败时的回退路径）
     private func wasmFallbackSign(ipaPath: URL, p12URL: URL, provURL: URL, item: DownloadManager.DownloadItem) async {
+        signEngine.addLine("回退网页签名引擎…", size: 14, color: .secondary)
         do {
             let data = try await signEngine.sign(ipaURL: ipaPath, p12URL: p12URL, provURL: provURL, password: "iosxb.cn")
             let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -2147,8 +2170,36 @@ struct DownloadView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 self.installSignedIPA()
             }
+            signEngine.addLine("签名成功", size: 17, color: .green)
         } catch {
-            signEngine.logText = "签名失败：\n\(error.localizedDescription)"
+            signEngine.addLine("签名失败：\(error.localizedDescription)", size: 14, color: .red)
+        }
+    }
+
+    /// 从 IPA 内 Info.plist 读应用名/版本/包名（签名前逐行显示用）
+    private func readIPAInfo(path: URL) async -> (name: String, version: String, bundleId: String) {
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var name = path.lastPathComponent
+                var version = ""
+                var bundleId = ""
+                let cap = 2 * 1024 * 1024
+                var buf = [CChar](repeating: 0, count: cap)
+                var outLen = cap
+                let rc = path.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+                    guard let p = ptr else { return -1 }
+                    return zsign_ipa_info(p, &buf, &outLen)
+                }
+                if rc == 0, outLen > 0 {
+                    let data = Data(bytes: buf, count: outLen)
+                    if let plist = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String: Any] {
+                        name = (plist["CFBundleDisplayName"] as? String) ?? (plist["CFBundleName"] as? String) ?? name
+                        version = (plist["CFBundleShortVersionString"] as? String) ?? ""
+                        bundleId = (plist["CFBundleIdentifier"] as? String) ?? ""
+                    }
+                }
+                cont.resume(returning: (name, version, bundleId))
+            }
         }
     }
 
@@ -2314,8 +2365,22 @@ struct WebBrowserView: UIViewRepresentable {
 }
 
 // MARK: - 签名引擎（内置 WebView 运行 zsign-wasm 真签名）
+// MARK: - 签名日志行（控制台式逐行输出）
+struct SignLogLine: Identifiable {
+    let id = UUID()
+    let text: String
+    let size: CGFloat
+    let color: Color
+}
+
 class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, ObservableObject {
     @Published var logText = "签名引擎未启动"
+    @Published var logLines: [SignLogLine] = []
+
+    func addLine(_ text: String, size: CGFloat = 14, color: Color = .primary) {
+        logLines.append(SignLogLine(text: text, size: size, color: color))
+    }
+
     private var webView: WKWebView?
     private var resume: ((Result<Data, Error>) -> Void)?
     private var ipaURL: URL?
