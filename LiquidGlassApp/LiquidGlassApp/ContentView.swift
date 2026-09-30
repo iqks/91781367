@@ -2510,12 +2510,11 @@ struct SettingsView: View {
                     Toggle("深色模式", isOn: $darkMode)
                         .tint(.blue)
                 }
+            }
             .navigationTitle("设置")
         }
     }
 }
-
-/// 签名引擎诊断日志：签名闪退后重开 App 在这里查看
 
 /// 证书管理：内置证书，无需手动导入
 struct CertificateSettingsView: View {
