@@ -19,6 +19,9 @@ struct ContentView: View {
     @StateObject private var downloader = DownloadManager()
     @State private var selectedTab = 0
     @AppStorage("darkMode") private var darkMode = false
+    @State private var showUDIDAlert = false   // 未获取 UDID 时的强制弹窗
+    @AppStorage("lastUDID") private var storedUDID = ""
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -45,6 +48,28 @@ struct ContentView: View {
         .onOpenURL { url in
             handleIncomingURL(url)
         }
+        .onAppear { checkUDID() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { checkUDID() }
+        }
+        .alert("需要获取设备 UDID", isPresented: $showUDIDAlert) {
+            Button("去获取") { openUDIDPage() }
+        } message: {
+            Text("签名安装前必须先获取您的设备 UDID。\n请前往获取页面安装描述文件，完成后会自动回到本应用。")
+        }
+    }
+
+    /// 检查是否已获取 UDID：没有就强制弹窗（弹窗不可关闭，只能去获取）
+    private func checkUDID() {
+        let udid = UserDefaults.standard.string(forKey: "lastUDID") ?? ""
+        showUDIDAlert = udid.isEmpty
+    }
+
+    /// 打开 UDID 获取页（Safari 安装描述文件）
+    private func openUDIDPage() {
+        if let url = URL(string: "https://ios.zhaisir.cn") {
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        }
     }
 
     /// 处理 signhelper:// 外部跳转（UDID 描述文件安装完成后打开 App）
@@ -55,6 +80,7 @@ struct ContentView: View {
             UserDefaults.standard.set(u, forKey: "lastUDID")
         }
         selectedTab = 2
+        checkUDID()
     }
 }
 
@@ -1768,10 +1794,7 @@ struct DownloadView: View {
     @State private var signMessage = ""
     @State private var showSignSheet = false
     @State private var signTarget: DownloadManager.DownloadItem?
-    @State private var uploadProgress: Double?     // 上传安装包进度（nil=未在上传）
-    @State private var uploadSent: Int64 = 0
-    @State private var uploadTotal: Int64 = 0
-    @State private var uploadSpeed: Double = 0
+
     @State private var showInstallPrompt = false   // 签名完成 → 自动弹安装确认
     @State private var pendingInstallURL: URL?     // 待安装的已签名 IPA
     @State private var pendingInstallName = ""
@@ -1779,9 +1802,20 @@ struct DownloadView: View {
     var body: some View {
         content
             .confirmationDialog("选择操作", isPresented: $showActions, titleVisibility: .visible) {
-                Button("签名") { startSigning(actionItem) }
-                Button("提取应用库") {
-                    if let url = actionItem?.path { activeSheet = .export(url) }
+                // 已签名项：第一项是安装；未签名项：第一项是签名
+                if let item = actionItem, downloader.signedItems.contains(where: { $0.id == item.id }) {
+                    Button("安装") {
+                        if let url = actionItem?.path {
+                            pendingInstallURL = url
+                            pendingInstallName = actionItem?.name ?? ""
+                            installSignedIPA()
+                        }
+                    }
+                } else {
+                    Button("签名") { startSigning(actionItem) }
+                    Button("提取应用库") {
+                        if let url = actionItem?.path { activeSheet = .export(url) }
+                    }
                 }
                 Button("分享") {
                     if let url = actionItem?.path { activeSheet = .share(url) }
@@ -1789,6 +1823,7 @@ struct DownloadView: View {
                 Button("删除", role: .destructive) {
                     if let item = actionItem { deleteItem(item) }
                 }
+                Button("取消", role: .cancel) {}
             } message: {
                 Text(actionItem?.name ?? "")
             }
@@ -1820,18 +1855,18 @@ struct DownloadView: View {
             .sheet(isPresented: $showSignSheet) {
                 NavigationStack {
                     VStack(spacing: 0) {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 7) {
-                                ForEach(signEngine.logLines) { line in
-                                    Text(line.text)
-                                        .font(.system(size: line.size))
-                                        .foregroundStyle(line.color)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding()
+                        SignWebView(engine: signEngine)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        HStack {
+                            Text(signEngine.logText)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Spacer()
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.horizontal)
+                        .padding(.vertical, 10)
+                        .background(.thinMaterial)
                     }
                     .navigationTitle("签名")
                     .navigationBarTitleDisplayMode(.inline)
@@ -1842,34 +1877,6 @@ struct DownloadView: View {
                     }
                     .interactiveDismissDisabled(true)
                     .onAppear { startActualSign() }
-                }
-            }
-            .overlay {
-                if let p = uploadProgress {
-                    VStack(spacing: 8) {
-                        ProgressView(value: p)
-                            .frame(width: 220)
-                        Text("正在上传安装包 \(Int(p * 100))%")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        if uploadTotal > 0 {
-                            Text(String(format: "已传 %.1f MB / 共 %.1f MB", Double(uploadSent) / 1048576, Double(uploadTotal) / 1048576))
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            if uploadSpeed > 0 {
-                                Text(String(format: "速度 %.0f KB/s · 剩余约 %.0f 秒", uploadSpeed / 1024, Double(uploadTotal - uploadSent) / max(uploadSpeed, 1)))
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Text("安装包较大时可能需要几分钟，请勿关闭页面")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(20)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-                    .shadow(radius: 8)
-                    .padding(.bottom, 60)
                 }
             }
             .alert("签名完成", isPresented: $showInstallPrompt) {
@@ -2071,31 +2078,9 @@ struct DownloadView: View {
             return
         }
         Task {
-            // 控制台日志：一行一行输出
-            signEngine.logLines = []
-            let appVer = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0"
-            signEngine.addLine("签名工具\"签名助手工具版本\"\(appVer)", size: 11, color: .secondary)
-            signEngine.addLine("系统版本 iOS \(UIDevice.current.systemVersion)", size: 11, color: .secondary)
-            signEngine.addLine("签名任务", size: 17, color: .green)
-            // 从 IPA 里读应用信息（应用名/版本/包名）
-            let info = await readIPAInfo(path: path)
-            signEngine.addLine("APP 名称\"\(info.name)\"", size: 14)
-            if !info.version.isEmpty {
-                signEngine.addLine("版本号 \(info.version)", size: 14)
-            }
-            if !info.bundleId.isEmpty {
-                signEngine.addLine("标识符 \(info.bundleId)", size: 14)
-            }
-            let sizeBytes = (try? path.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-            signEngine.addLine(String(format: "文件大小 %.1f MB", Double(sizeBytes) / 1048576.0), size: 14)
-            // 原生签名
-            signEngine.logText = "原生签名引擎就绪…"
-            let t0 = Date()
+            signEngine.logText = "原生签名引擎就绪…\n正在签名…"
             let (ok, outURL, errMsg) = await nativeSign(ipaPath: path, p12URL: p12, provURL: prov, password: "iosxb.cn")
-            let elapsed = Date().timeIntervalSince(t0)
             if ok, let dest = outURL {
-                signEngine.addLine(String(format: "打包进程 · 总耗时 %.2f 秒", elapsed), size: 14, color: .green)
-                signEngine.addLine("签名成功", size: 17, color: .green)
                 let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                     .appendingPathComponent("Signed", isDirectory: true)
                 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -2109,12 +2094,12 @@ struct DownloadView: View {
                 pendingInstallURL = finalDest
                 pendingInstallName = name
                 filter = "已签名"
-                // 让用户看到绿色的"签名成功"后再弹安装框
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                // 签名完成直接弹系统安装框
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     self.installSignedIPA()
                 }
             } else {
-                signEngine.addLine("签名失败：\(errMsg ?? "未知错误")", size: 14, color: .red)
+                signEngine.logText = "原生签名失败：\(errMsg ?? "未知错误")\n正在回退网页签名引擎…"
                 await wasmFallbackSign(ipaPath: path, p12URL: p12, provURL: prov, item: item)
             }
         }
@@ -2152,7 +2137,6 @@ struct DownloadView: View {
 
     /// 网页 wasm 签名（原生签名失败时的回退路径）
     private func wasmFallbackSign(ipaPath: URL, p12URL: URL, provURL: URL, item: DownloadManager.DownloadItem) async {
-        signEngine.addLine("回退网页签名引擎…", size: 14, color: .secondary)
         do {
             let data = try await signEngine.sign(ipaURL: ipaPath, p12URL: p12URL, provURL: provURL, password: "iosxb.cn")
             let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -2170,36 +2154,8 @@ struct DownloadView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 self.installSignedIPA()
             }
-            signEngine.addLine("签名成功", size: 17, color: .green)
         } catch {
-            signEngine.addLine("签名失败：\(error.localizedDescription)", size: 14, color: .red)
-        }
-    }
-
-    /// 从 IPA 内 Info.plist 读应用名/版本/包名（签名前逐行显示用）
-    private func readIPAInfo(path: URL) async -> (name: String, version: String, bundleId: String) {
-        await withCheckedContinuation { cont in
-            DispatchQueue.global(qos: .userInitiated).async {
-                var name = path.lastPathComponent
-                var version = ""
-                var bundleId = ""
-                let cap = 2 * 1024 * 1024
-                var buf = [CChar](repeating: 0, count: cap)
-                var outLen = Int32(cap)
-                let rc = path.withUnsafeFileSystemRepresentation { ptr -> Int32 in
-                    guard let p = ptr else { return -1 }
-                    return zsign_ipa_info(p, &buf, &outLen)
-                }
-                if rc == 0, outLen > 0 {
-                    let data = Data(bytes: buf, count: Int(outLen))
-                    if let plist = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String: Any] {
-                        name = (plist["CFBundleDisplayName"] as? String) ?? (plist["CFBundleName"] as? String) ?? name
-                        version = (plist["CFBundleShortVersionString"] as? String) ?? ""
-                        bundleId = (plist["CFBundleIdentifier"] as? String) ?? ""
-                    }
-                }
-                cont.resume(returning: (name, version, bundleId))
-            }
+            signEngine.logText = "签名失败：\n\(error.localizedDescription)"
         }
     }
 
@@ -2233,18 +2189,8 @@ struct DownloadView: View {
                 cfg.timeoutIntervalForRequest = 600
                 cfg.timeoutIntervalForResource = 900
                 let delegate = SelfSignedSessionDelegate()
-                delegate.onProgress = { p, sent, total, speed in
-                    DispatchQueue.main.async {
-                        self.uploadProgress = p
-                        self.uploadSent = sent
-                        self.uploadTotal = total
-                        self.uploadSpeed = speed
-                    }
-                }
                 let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
-                DispatchQueue.main.async { self.uploadProgress = 0.001 }
                 let (respData, _) = try await session.upload(for: req, from: data)
-                DispatchQueue.main.async { self.uploadProgress = nil }
                 if let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
                    let ok = obj["ok"] as? Bool, ok,
                    let plist = obj["plist"] as? String,
@@ -2255,11 +2201,9 @@ struct DownloadView: View {
                         return
                     }
                 }
-                DispatchQueue.main.async { self.uploadProgress = nil }
                 signMessage = "安装服务未响应，请到「已签名」用全能签安装"
                 showSignResult = true
             } catch {
-                DispatchQueue.main.async { self.uploadProgress = nil }
                 signMessage = "无法连接安装服务器，请到「已签名」用全能签安装"
                 showSignResult = true
             }
@@ -2277,10 +2221,6 @@ struct DownloadView: View {
 
 // MARK: - 信任自签证书的 URLSession（连接用户自签证书的安装服务器，含上传进度）
 final class SelfSignedSessionDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
-    var onProgress: ((Double, Int64, Int64, Double) -> Void)?
-    private var lastSent: Int64 = 0
-    private var lastTime: TimeInterval = 0
-
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
@@ -2289,25 +2229,6 @@ final class SelfSignedSessionDelegate: NSObject, URLSessionDelegate, URLSessionT
         } else {
             completionHandler(.performDefaultHandling, nil)
         }
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask,
-                    didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
-        guard totalBytesExpectedToSend > 0 else { return }
-        let now = Date().timeIntervalSince1970
-        var speed: Double = 0
-        if lastTime > 0 {
-            let dt = now - lastTime
-            if dt > 0.2 {
-                speed = Double(totalBytesSent - lastSent) / dt
-                lastSent = totalBytesSent
-                lastTime = now
-            }
-        } else {
-            lastSent = totalBytesSent
-            lastTime = now
-        }
-        onProgress?(Double(totalBytesSent) / Double(totalBytesExpectedToSend), totalBytesSent, totalBytesExpectedToSend, speed)
     }
 }
 
@@ -2365,22 +2286,8 @@ struct WebBrowserView: UIViewRepresentable {
 }
 
 // MARK: - 签名引擎（内置 WebView 运行 zsign-wasm 真签名）
-// MARK: - 签名日志行（控制台式逐行输出）
-struct SignLogLine: Identifiable {
-    let id = UUID()
-    let text: String
-    let size: CGFloat
-    let color: Color
-}
-
 class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, ObservableObject {
     @Published var logText = "签名引擎未启动"
-    @Published var logLines: [SignLogLine] = []
-
-    func addLine(_ text: String, size: CGFloat = 14, color: Color = .primary) {
-        logLines.append(SignLogLine(text: text, size: size, color: color))
-    }
-
     private var webView: WKWebView?
     private var resume: ((Result<Data, Error>) -> Void)?
     private var ipaURL: URL?
@@ -2603,70 +2510,12 @@ struct SettingsView: View {
                     Toggle("深色模式", isOn: $darkMode)
                         .tint(.blue)
                 }
-                Section("签名诊断") {
-                    NavigationLink {
-                        SignDiagnosticsView()
-                    } label: {
-                        Label("签名引擎日志", systemImage: "doc.text.magnifyingglass")
-                    }
-                    Text("签名闪退后打开这里，复制日志发给开发者")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
             .navigationTitle("设置")
         }
     }
 }
 
 /// 签名引擎诊断日志：签名闪退后重开 App 在这里查看
-struct SignDiagnosticsView: View {
-    @State private var logText = "读取中…"
-    @State private var copied = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                Text(logText)
-                    .font(.system(.footnote, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .textSelection(.enabled)
-            }
-            .background(Color(.systemGroupedBackground))
-            Divider()
-            HStack {
-                Button {
-                    UIPasteboard.general.string = logText
-                    copied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
-                } label: {
-                    Label(copied ? "已复制" : "复制日志", systemImage: copied ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(.borderedProminent)
-                Spacer()
-                Button("刷新") {
-                    loadLog()
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding()
-        }
-        .navigationTitle("签名引擎日志")
-        .onAppear { loadLog() }
-    }
-
-    private func loadLog() {
-        let fm = FileManager.default
-        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let logPath = docs.appendingPathComponent("zsign_debug.log")
-        if let data = try? Data(contentsOf: logPath), let str = String(data: data, encoding: .utf8), !str.isEmpty {
-            logText = str
-        } else {
-            logText = "暂无日志。\n\n请到首页/下载页签一次名（让它闪退），再回来这里查看。"
-        }
-    }
-}
 
 /// 证书管理：内置证书，无需手动导入
 struct CertificateSettingsView: View {
