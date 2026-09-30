@@ -692,17 +692,17 @@ cc  -I. -Iinclude -fPIC -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroo
 /opt/homebrew/Cellar/perl/5.44.0/bin/perl apps/progs.pl apps/openssl > apps/progs.h
 /opt/homebrew/Cellar/perl/5.44.0/bin/perl "-I." -Mconfigdata "util/dofile.pl" \
 	    "-oMakefile" apps/CA.pl.in > "apps/CA.pl"
-chmod a+x apps/CA.pl
 /opt/homebrew/Cellar/perl/5.44.0/bin/perl "-I." -Mconfigdata "util/dofile.pl" \
 	    "-oMakefile" apps/tsget.in > "apps/tsget.pl"
+chmod a+x apps/CA.pl
+chmod a+x apps/tsget.pl
 /opt/homebrew/Cellar/perl/5.44.0/bin/perl "-I." -Mconfigdata "util/dofile.pl" \
 	    "-oMakefile" tools/c_rehash.in > "tools/c_rehash"
 /opt/homebrew/Cellar/perl/5.44.0/bin/perl "-I." -Mconfigdata "util/dofile.pl" \
 	    "-oMakefile" util/shlib_wrap.sh.in > "util/shlib_wrap.sh"
 ar r apps/libapps.a apps/app_rand.o apps/apps.o apps/bf_prefix.o apps/opt.o apps/s_cb.o apps/s_socket.o
-chmod a+x apps/tsget.pl
-cc  -I. -Iinclude -Icrypto -fPIC -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -DOPENSSL_PIC -DOPENSSLDIR="\"/tmp/osl/openssl-OpenSSL_1_1_1w/out/ssl\"" -DENGINESDIR="\"/tmp/osl/openssl-OpenSSL_1_1_1w/out/lib/engines-1.1\"" -D_REENTRANT -DNDEBUG  -MMD -MF crypto/cversion.d.tmp -MT crypto/cversion.o -c -o crypto/cversion.o crypto/cversion.c
 chmod a+x tools/c_rehash
+cc  -I. -Iinclude -Icrypto -fPIC -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -DOPENSSL_PIC -DOPENSSLDIR="\"/tmp/osl/openssl-OpenSSL_1_1_1w/out/ssl\"" -DENGINESDIR="\"/tmp/osl/openssl-OpenSSL_1_1_1w/out/lib/engines-1.1\"" -D_REENTRANT -DNDEBUG  -MMD -MF crypto/cversion.d.tmp -MT crypto/cversion.o -c -o crypto/cversion.o crypto/cversion.c
 ar r libssl.a ssl/bio_ssl.o ssl/d1_lib.o ssl/d1_msg.o ssl/d1_srtp.o ssl/methods.o ssl/packet.o ssl/pqueue.o ssl/record/dtls1_bitmap.o ssl/record/rec_layer_d1.o ssl/record/rec_layer_s3.o ssl/record/ssl3_buffer.o ssl/record/ssl3_record.o ssl/record/ssl3_record_tls13.o ssl/s3_cbc.o ssl/s3_enc.o ssl/s3_lib.o ssl/s3_msg.o ssl/ssl_asn1.o ssl/ssl_cert.o ssl/ssl_ciph.o ssl/ssl_conf.o ssl/ssl_err.o ssl/ssl_init.o ssl/ssl_lib.o ssl/ssl_mcnf.o ssl/ssl_rsa.o ssl/ssl_sess.o ssl/ssl_stat.o ssl/ssl_txt.o ssl/ssl_utst.o ssl/statem/extensions.o ssl/statem/extensions_clnt.o ssl/statem/extensions_cust.o ssl/statem/extensions_srvr.o ssl/statem/statem.o ssl/statem/statem_clnt.o ssl/statem/statem_dtls.o ssl/statem/statem_lib.o ssl/statem/statem_srvr.o ssl/t1_enc.o ssl/t1_lib.o ssl/t1_trce.o ssl/tls13_enc.o ssl/tls_srp.o
 chmod a+x util/shlib_wrap.sh
 cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/asn1pars.d.tmp -MT apps/asn1pars.o -c -o apps/asn1pars.o apps/asn1pars.c
@@ -713,13 +713,13 @@ cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysro
 cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/crl2p7.d.tmp -MT apps/crl2p7.o -c -o apps/crl2p7.o apps/crl2p7.c
 cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/dgst.d.tmp -MT apps/dgst.o -c -o apps/dgst.o apps/dgst.c
 cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/dhparam.d.tmp -MT apps/dhparam.o -c -o apps/dhparam.o apps/dhparam.c
-cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/dsa.d.tmp -MT apps/dsa.o -c -o apps/dsa.o apps/dsa.c
-ar: creating archive apps/libapps.a
 ar: creating archive libssl.a
+ar: creating archive apps/libapps.a
+cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/dsa.d.tmp -MT apps/dsa.o -c -o apps/dsa.o apps/dsa.c
+ranlib -c libssl.a || echo Never mind.
+ranlib -c apps/libapps.a || echo Never mind.
 cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/dsaparam.d.tmp -MT apps/dsaparam.o -c -o apps/dsaparam.o apps/dsaparam.c
 cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/ec.d.tmp -MT apps/ec.o -c -o apps/ec.o apps/ec.c
-ranlib -c apps/libapps.a || echo Never mind.
-ranlib -c libssl.a || echo Never mind.
 cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/ecparam.d.tmp -MT apps/ecparam.o -c -o apps/ecparam.o apps/ecparam.c
 cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/enc.d.tmp -MT apps/enc.o -c -o apps/enc.o apps/enc.c
 cc  -I. -Iinclude -Iapps -arch arm64 -mios-version-min=7.0.0 -fno-common -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -O3 -D_REENTRANT -DNDEBUG  -MMD -MF apps/errstr.d.tmp -MT apps/errstr.o -c -o apps/errstr.o apps/errstr.c
