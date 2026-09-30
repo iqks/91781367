@@ -1769,6 +1769,9 @@ struct DownloadView: View {
     @State private var showSignSheet = false
     @State private var signTarget: DownloadManager.DownloadItem?
     @State private var uploadProgress: Double?     // 上传安装包进度（nil=未在上传）
+    @State private var uploadSent: Int64 = 0
+    @State private var uploadTotal: Int64 = 0
+    @State private var uploadSpeed: Double = 0
     @State private var showInstallPrompt = false   // 签名完成 → 自动弹安装确认
     @State private var pendingInstallURL: URL?     // 待安装的已签名 IPA
     @State private var pendingInstallName = ""
@@ -1846,9 +1849,22 @@ struct DownloadView: View {
                     VStack(spacing: 8) {
                         ProgressView(value: p)
                             .frame(width: 220)
-                        Text("正在上传安装包 \(Int(p * 100))%…")
+                        Text("正在上传安装包 \(Int(p * 100))%")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                        if uploadTotal > 0 {
+                            Text(String(format: "已传 %.1f MB / 共 %.1f MB", Double(uploadSent) / 1048576, Double(uploadTotal) / 1048576))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            if uploadSpeed > 0 {
+                                Text(String(format: "速度 %.0f KB/s · 剩余约 %.0f 秒", uploadSpeed / 1024, Double(uploadTotal - uploadSent) / max(uploadSpeed, 1)))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Text("安装包较大时可能需要几分钟，请勿关闭页面")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -2161,13 +2177,18 @@ struct DownloadView: View {
                 req.httpMethod = "POST"
                 req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
                 req.setValue(name, forHTTPHeaderField: "X-Filename")
-                req.timeoutInterval = 180
+                req.timeoutInterval = 600
                 let cfg = URLSessionConfiguration.ephemeral
-                cfg.timeoutIntervalForRequest = 180
-                cfg.timeoutIntervalForResource = 240
+                cfg.timeoutIntervalForRequest = 600
+                cfg.timeoutIntervalForResource = 900
                 let delegate = SelfSignedSessionDelegate()
-                delegate.onProgress = { p in
-                    DispatchQueue.main.async { self.uploadProgress = p }
+                delegate.onProgress = { p, sent, total, speed in
+                    DispatchQueue.main.async {
+                        self.uploadProgress = p
+                        self.uploadSent = sent
+                        self.uploadTotal = total
+                        self.uploadSpeed = speed
+                    }
                 }
                 let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
                 DispatchQueue.main.async { self.uploadProgress = 0.001 }
@@ -2205,7 +2226,9 @@ struct DownloadView: View {
 
 // MARK: - 信任自签证书的 URLSession（连接用户自签证书的安装服务器，含上传进度）
 final class SelfSignedSessionDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
-    var onProgress: ((Double) -> Void)?
+    var onProgress: ((Double, Int64, Int64, Double) -> Void)?
+    private var lastSent: Int64 = 0
+    private var lastTime: TimeInterval = 0
 
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
@@ -2220,7 +2243,20 @@ final class SelfSignedSessionDelegate: NSObject, URLSessionDelegate, URLSessionT
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
         guard totalBytesExpectedToSend > 0 else { return }
-        onProgress?(Double(totalBytesSent) / Double(totalBytesExpectedToSend))
+        let now = Date().timeIntervalSince1970
+        var speed: Double = 0
+        if lastTime > 0 {
+            let dt = now - lastTime
+            if dt > 0.2 {
+                speed = Double(totalBytesSent - lastSent) / dt
+                lastSent = totalBytesSent
+                lastTime = now
+            }
+        } else {
+            lastSent = totalBytesSent
+            lastTime = now
+        }
+        onProgress?(Double(totalBytesSent) / Double(totalBytesExpectedToSend), totalBytesSent, totalBytesExpectedToSend, speed)
     }
 }
 
