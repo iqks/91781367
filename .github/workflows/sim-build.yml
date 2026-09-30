@@ -27,10 +27,14 @@ jobs:
           tar -xzf openssl.tar.gz
           cd openssl-OpenSSL_1_1_1w
           set -o pipefail
-          # 1.1.1w 没有 ios-sim-cross 目标；iOS 模拟器 app 本质是跑在 macOS 上的 x86_64 二进制，
-          # 用 darwin64-x86_64-cc 编出的 libcrypto.a 可直接链接进模拟器版
-          ./Configure darwin64-x86_64-cc no-shared no-asm no-engine no-dso no-tests --prefix="$(pwd)/out" 2>&1 | tee /tmp/osl_sim.log | tail -40
+          # 1.1.1w 没有 ios-sim-cross 目标；用 darwin64 目标 + 指定 iphonesimulator SDK 的 sysroot 编译，
+          # 这样编出的 libcrypto.a 平台标记就是 iOS-simulator，能被模拟器版链接
+          IOS_SIM_SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          ./Configure darwin64-x86_64-cc no-shared no-asm no-engine no-dso no-tests \
+            CC="clang -isysroot $IOS_SIM_SDK -mios-simulator-version-min=15.0 -arch x86_64" \
+            --prefix="$(pwd)/out" 2>&1 | tee /tmp/osl_sim.log | tail -40
           make -j4 2>&1 | tee -a /tmp/osl_sim.log | tail -40
+          file libcrypto.a | head -2
           ls -la libcrypto.a
           cp libcrypto.a "$WORK/thirdparty/lib/"
           cp -R include/openssl "$WORK/thirdparty/include/"
