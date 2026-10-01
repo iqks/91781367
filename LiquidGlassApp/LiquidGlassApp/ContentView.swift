@@ -2313,7 +2313,7 @@ struct DownloadView: View {
     private func installSignedIPA() {
         guard let url = pendingInstallURL else { return }
         // 秒开：该已签名 IPA 之前上传过，服务器已有 plist，直接弹系统安装框
-        if let idx = downloader.signedItems.firstIndex(where: { $0.path == url }),
+        if let idx = downloader.signedItems.lastIndex(where: { $0.path == url }),
            let cached = downloader.signedItems[idx].installURL,
            let u = URL(string: cached) {
             UIApplication.shared.open(u, options: [:]) { _ in }
@@ -2374,7 +2374,7 @@ struct DownloadView: View {
                 if let plist = finalPlist,
                    let enc = plist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
                     let itms = "itms-services://?action=download-manifest&url=\(enc)"
-                    if let idx = downloader.signedItems.firstIndex(where: { $0.path == url }) {
+                    if let idx = downloader.signedItems.lastIndex(where: { $0.path == url }) {
                         downloader.signedItems[idx].installURL = itms
                     }
                     if let u = URL(string: itms) {
