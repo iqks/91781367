@@ -2309,7 +2309,7 @@ struct DownloadView: View {
         return n
     }
 
-    /// 签名完成：安装。优先用服务器已保存的安装链接（秒开），没有才重新上传
+    /// 签名完成：安装。优先用服务器已保存的安装链接（秒开），没有才分块上传
     private func installSignedIPA() {
         guard let url = pendingInstallURL else { return }
         // 秒开：该已签名 IPA 之前上传过，服务器已有 plist，直接弹系统安装框
@@ -2321,44 +2321,72 @@ struct DownloadView: View {
         }
         let name = pendingInstallName
         Task {
-            // 隧道容易瞬时断：自动重试 3 次（间隔 5 秒），减少「安装服务未响应」
-            for attempt in 1...3 {
-                do {
-                    let data = try Data(contentsOf: url)
-                    var req = URLRequest(url: URL(string: "https://ios.zhaisir.cn/upload_app")!)
-                    req.httpMethod = "POST"
-                    req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-                    req.setValue(name, forHTTPHeaderField: "X-Filename")
-                    req.timeoutInterval = 300
-                    let cfg = URLSessionConfiguration.ephemeral
-                    cfg.timeoutIntervalForRequest = 300
-                    cfg.timeoutIntervalForResource = 600
-                    let delegate = SelfSignedSessionDelegate()
-                    let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
-                    let (respData, _) = try await session.upload(for: req, from: data)
-                    if let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
-                       let ok = obj["ok"] as? Bool, ok,
-                       let plist = obj["plist"] as? String,
-                       let enc = plist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-                        let itms = "itms-services://?action=download-manifest&url=\(enc)"
-                        // 存起来：下次点安装直接秒开，不再上传
-                        if let idx = downloader.signedItems.firstIndex(where: { $0.path == url }) {
-                            downloader.signedItems[idx].installURL = itms
+            do {
+                let data = try Data(contentsOf: url)
+                // 隧道上行慢且大包容易断：分小块（256KB）逐个传，每块带重试
+                let chunkSize = 256 * 1024
+                let total = max(1, (data.count + chunkSize - 1) / chunkSize)
+                var finalPlist: String? = nil
+                for i in 0..<total {
+                    let start = i * chunkSize
+                    let end = min(start + chunkSize, data.count)
+                    let chunk = data.subdata(in: start..<end)
+                    signMessage = "正在上传安装包 (\(i + 1)/\(total))…"
+                    var success = false
+                    for attempt in 1...3 {
+                        do {
+                            var req = URLRequest(url: URL(string: "https://ios.zhaisir.cn/upload_chunk")!)
+                            req.httpMethod = "POST"
+                            req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+                            req.setValue(name, forHTTPHeaderField: "X-Filename")
+                            req.setValue("\(i)", forHTTPHeaderField: "X-Index")
+                            req.setValue("\(total)", forHTTPHeaderField: "X-Total")
+                            req.timeoutInterval = 60
+                            let cfg = URLSessionConfiguration.ephemeral
+                            cfg.timeoutIntervalForRequest = 60
+                            cfg.timeoutIntervalForResource = 120
+                            let delegate = SelfSignedSessionDelegate()
+                            let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
+                            let (respData, _) = try await session.upload(for: req, from: chunk)
+                            if let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
+                               let ok = obj["ok"] as? Bool, ok {
+                                if let plist = obj["plist"] as? String {
+                                    finalPlist = plist
+                                }
+                                success = true
+                                break
+                            }
+                        } catch {
+                            // 块失败：稍等重试
                         }
-                        if let u = URL(string: itms) {
-                            UIApplication.shared.open(u, options: [:]) { _ in }
-                            return
+                        if attempt < 3 {
+                            try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
                         }
                     }
-                } catch {
-                    // 失败就等 5 秒重试
+                    if !success {
+                        signMessage = "安装服务未响应（已自动重试），请到「已签名」用全能签安装"
+                        showSignResult = true
+                        return
+                    }
                 }
-                if attempt < 3 {
-                    try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+                // 全部块上传完成，直接弹系统安装框
+                if let plist = finalPlist,
+                   let enc = plist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                    let itms = "itms-services://?action=download-manifest&url=\(enc)"
+                    if let idx = downloader.signedItems.firstIndex(where: { $0.path == url }) {
+                        downloader.signedItems[idx].installURL = itms
+                    }
+                    if let u = URL(string: itms) {
+                        UIApplication.shared.open(u, options: [:]) { _ in }
+                        return
+                    }
                 }
+                signMessage = "安装服务未响应，请到「已签名」用全能签安装"
+                showSignResult = true
+            } catch {
+                signMessage = "安装服务未响应，请到「已签名」用全能签安装"
+                showSignResult = true
             }
-            signMessage = "安装服务未响应（已自动重试 3 次），请到「已签名」用全能签安装"
-            showSignResult = true
         }
     }
 
