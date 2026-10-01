@@ -2319,11 +2319,12 @@ struct DownloadView: View {
             UIApplication.shared.open(u, options: [:]) { _ in }
             return
         }
-        let name = pendingInstallName
         Task {
             do {
                 let data = try Data(contentsOf: url)
-                // 隧道上行慢且大包容易断：分小块（256KB）逐个传，每块带重试
+                // HTTP 头只能传 ASCII：文件名固定英文，中文显示名只用于界面
+                let safeName = "signed.ipa"
+                // 隧道上行慢且容易断：分小块（256KB）逐个传，每块最多重试 5 次
                 let chunkSize = 256 * 1024
                 let total = max(1, (data.count + chunkSize - 1) / chunkSize)
                 var finalPlist: String? = nil
@@ -2333,12 +2334,12 @@ struct DownloadView: View {
                     let chunk = data.subdata(in: start..<end)
                     signMessage = "正在上传安装包 (\(i + 1)/\(total))…"
                     var success = false
-                    for attempt in 1...3 {
+                    for attempt in 1...5 {
                         do {
                             var req = URLRequest(url: URL(string: "https://ios.zhaisir.cn/upload_chunk")!)
                             req.httpMethod = "POST"
                             req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-                            req.setValue(name, forHTTPHeaderField: "X-Filename")
+                            req.setValue(safeName, forHTTPHeaderField: "X-Filename")
                             req.setValue("\(i)", forHTTPHeaderField: "X-Index")
                             req.setValue("\(total)", forHTTPHeaderField: "X-Total")
                             req.timeoutInterval = 60
@@ -2357,14 +2358,14 @@ struct DownloadView: View {
                                 break
                             }
                         } catch {
-                            // 块失败：稍等重试
+                            // 块失败：等 3 秒重试（隧道断流通常几秒内恢复）
                         }
-                        if attempt < 3 {
-                            try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
+                        if attempt < 5 {
+                            try? await Task.sleep(nanoseconds: 3 * 1_000_000_000)
                         }
                     }
                     if !success {
-                        signMessage = "安装服务未响应（已自动重试），请到「已签名」用全能签安装"
+                        signMessage = "安装服务未响应（上传中断），请到「已签名」再点一次安装"
                         showSignResult = true
                         return
                     }
