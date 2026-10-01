@@ -103,7 +103,7 @@ struct ContentView: View {
     private func checkNetwork() {
         guard let url = URL(string: "https://ios.zhaisir.cn/api/content") else { return }
         var req = URLRequest(url: url)
-        req.timeoutInterval = 5
+        req.timeoutInterval = 15
         URLSession.shared.dataTask(with: req) { _, resp, _ in
             let ok = (resp as? HTTPURLResponse)?.statusCode == 200
             DispatchQueue.main.async { networkOK = ok }
@@ -2334,7 +2334,7 @@ struct DownloadView: View {
                     let chunk = data.subdata(in: start..<end)
                     signMessage = "正在上传安装包 (\(i + 1)/\(total))…"
                     var success = false
-                    for attempt in 1...5 {
+                    for attempt in 1...8 {
                         do {
                             var req = URLRequest(url: URL(string: "https://ios.zhaisir.cn/upload_chunk")!)
                             req.httpMethod = "POST"
@@ -2342,10 +2342,10 @@ struct DownloadView: View {
                             req.setValue(safeName, forHTTPHeaderField: "X-Filename")
                             req.setValue("\(i)", forHTTPHeaderField: "X-Index")
                             req.setValue("\(total)", forHTTPHeaderField: "X-Total")
-                            req.timeoutInterval = 60
+                            req.timeoutInterval = 90
                             let cfg = URLSessionConfiguration.ephemeral
-                            cfg.timeoutIntervalForRequest = 60
-                            cfg.timeoutIntervalForResource = 120
+                            cfg.timeoutIntervalForRequest = 90
+                            cfg.timeoutIntervalForResource = 180
                             let delegate = SelfSignedSessionDelegate()
                             let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
                             let (respData, _) = try await session.upload(for: req, from: chunk)
@@ -2358,10 +2358,10 @@ struct DownloadView: View {
                                 break
                             }
                         } catch {
-                            // 块失败：等 3 秒重试（隧道断流通常几秒内恢复）
+                            // 块失败：等 5 秒重试（隧道慢/断流时留宽窗口）
                         }
-                        if attempt < 5 {
-                            try? await Task.sleep(nanoseconds: 3 * 1_000_000_000)
+                        if attempt < 8 {
+                            try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
                         }
                     }
                     if !success {
