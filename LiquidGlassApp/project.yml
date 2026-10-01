@@ -18,6 +18,22 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: signhelper
             CFBundleURLSchemes: [signhelper]
+        # 像 QQ 一样：其他应用分享/打开 IPA 时，可以选择「签名助手」接收
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: IPA 应用包
+            LSItemContentTypes:
+              - com.signhelper.ipa
+              - public.zip-archive
+              - public.data
+            CFBundleTypeRole: Editor
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.signhelper.ipa
+            UTTypeConformsTo:
+              - public.zip-archive
+            UTTypeDescription: IPA 应用包
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - ipa
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true

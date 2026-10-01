@@ -23,6 +23,8 @@ struct ContentView: View {
     @AppStorage("lastUDID") private var storedUDID = ""
     @Environment(\.scenePhase) private var scenePhase
     @State private var networkOK = true        // 网络检测：没网也能进软件，只提示去连网
+    @State private var showImportNotice = false // 外部文件导入结果提示
+    @State private var importNotice = ""
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -84,6 +86,11 @@ struct ContentView: View {
         } message: {
             Text("签名安装前必须先获取您的设备 UDID。\n请前往获取页面安装描述文件，完成后会自动回到本应用。")
         }
+        .alert("导入", isPresented: $showImportNotice) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(importNotice)
+        }
     }
 
     /// 检查是否已获取 UDID：没有就强制弹窗（弹窗不可关闭，只能去获取）
@@ -117,8 +124,13 @@ struct ContentView: View {
         }
     }
 
-    /// 处理 signhelper:// 外部跳转（UDID 描述文件安装完成后打开 App）
+    /// 处理外部打开：文件分享（QQ/微信「用其他应用打开」→ 签名助手）或 signhelper:// 回调
     private func handleIncomingURL(_ url: URL) {
+        // 文件已在本地（QQ 下载的 IPA）：自动导入并解析，不用再下载
+        if url.isFileURL {
+            importExternalFile(url)
+            return
+        }
         guard url.scheme == "signhelper" else { return }
         if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
            let u = comps.queryItems?.first(where: { $0.name == "udid" })?.value, !u.isEmpty {
@@ -126,6 +138,52 @@ struct ContentView: View {
         }
         selectedTab = 2
         checkUDID()
+    }
+
+    /// 外部分享进来的 IPA：复制进 Downloads，自动加入列表（可直接签名），跳下载页
+    private func importExternalFile(_ url: URL) {
+        guard url.pathExtension.lowercased() == "ipa" else {
+            showFileImportError("仅支持 .ipa 文件")
+            return
+        }
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Downloads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let name = uniqueFileName(url.lastPathComponent, in: dir)
+        let dest = dir.appendingPathComponent(name)
+        do {
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try FileManager.default.removeItem(at: dest)
+            }
+            try FileManager.default.copyItem(at: url, to: dest)
+            let item = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest, installURL: nil)
+            withAnimation { downloader.items.append(item) }
+            selectedTab = 1   // 自动跳到下载页
+            showFileImportError("已导入「" + name + "」，可直接签名")
+        } catch {
+            showFileImportError("导入失败：" + error.localizedDescription)
+        }
+    }
+
+    /// 目标目录已有同名文件时生成唯一名：xxx(1).ipa
+    private func uniqueFileName(_ raw: String, in dir: URL) -> String {
+        let base = (raw as NSString).deletingPathExtension
+        let ext = (raw as NSString).pathExtension
+        var n = raw
+        var i = 1
+        while FileManager.default.fileExists(atPath: dir.appendingPathComponent(n).path) {
+            n = base + "(" + String(i) + ")." + ext
+            i += 1
+        }
+        return n
+    }
+
+    /// 导入结果提示（外部打开时用）
+    private func showFileImportError(_ msg: String) {
+        importNotice = msg
+        showImportNotice = true
     }
 }
 
@@ -2209,16 +2267,45 @@ struct DownloadView: View {
 
     /// 从文件 App 导入 IPA 到下载列表
     private func importFile(_ url: URL) {
+        guard url.pathExtension.lowercased() == "ipa" else {
+            signMessage = "仅支持 .ipa 文件"
+            showSignResult = true
+            return
+        }
         let didAccess = url.startAccessingSecurityScopedResource()
         defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Downloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let name = url.lastPathComponent
+        // 同名文件自动加序号，不再覆盖失败
+        let name = uniqueFileName(url.lastPathComponent, in: dir)
         let dest = dir.appendingPathComponent(name)
-        try? FileManager.default.copyItem(at: url, to: dest)
-        let item = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest, installURL: nil)
-        withAnimation { downloader.items.append(item) }
+        do {
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try FileManager.default.removeItem(at: dest)
+            }
+            try FileManager.default.copyItem(at: url, to: dest)
+            let item = DownloadManager.DownloadItem(name: name, url: dest, state: "done", progress: 1.0, path: dest, installURL: nil)
+            withAnimation { downloader.items.append(item) }
+            signMessage = "已导入「" + name + "」，可直接签名"
+            showSignResult = true
+        } catch {
+            signMessage = "导入失败：" + error.localizedDescription
+            showSignResult = true
+        }
+    }
+
+    /// 目标目录已有同名文件时生成唯一名：xxx(1).ipa
+    private func uniqueFileName(_ raw: String, in dir: URL) -> String {
+        let base = (raw as NSString).deletingPathExtension
+        let ext = (raw as NSString).pathExtension
+        var n = raw
+        var i = 1
+        while FileManager.default.fileExists(atPath: dir.appendingPathComponent(n).path) {
+            n = base + "(" + String(i) + ")." + ext
+            i += 1
+        }
+        return n
     }
 
     /// 签名完成：安装。优先用服务器已保存的安装链接（秒开），没有才重新上传
