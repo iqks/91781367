@@ -1938,8 +1938,9 @@ struct DownloadView: View {
                     DocumentExporter(url: url)
                 }
             }
-            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.item]) { result in
-                if case .success(let url) = result {
+            // 导入：用 UIKit 文档选择器（SwiftUI fileImporter 在 iOS 16 点文件不选中/按钮不变，换成它）
+            .sheet(isPresented: $showImporter) {
+                DocumentPicker { url in
                     importFile(url)
                 }
             }
@@ -2594,6 +2595,32 @@ class SignEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate, Observ
         webView?.stopLoading()
         webView = nil
         started = false
+    }
+}
+
+// MARK: - 文档选择器（导入 IPA 用，asCopy 直接复制到本地沙盒，最稳）
+struct DocumentPicker: UIViewControllerRepresentable {
+    let callback: (URL) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(callback) }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        // .item = 所有文件类型都能选；asCopy 让系统把文件复制进 App 沙盒，省去安全作用域问题
+        let vc = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+        vc.allowsMultipleSelection = false
+        vc.delegate = context.coordinator
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let callback: (URL) -> Void
+        init(_ cb: @escaping (URL) -> Void) { callback = cb }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard let u = urls.first else { return }
+            callback(u)
+        }
     }
 }
 
