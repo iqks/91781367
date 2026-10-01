@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var showUDIDAlert = false   // 未获取 UDID 时的强制弹窗
     @AppStorage("lastUDID") private var storedUDID = ""
     @Environment(\.scenePhase) private var scenePhase
+    @State private var networkOK = true        // 网络检测：没网也能进软件，只提示去连网
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -48,10 +49,36 @@ struct ContentView: View {
         .onOpenURL { url in
             handleIncomingURL(url)
         }
-        .onAppear { checkUDID() }
-        .onChange(of: scenePhase) { phase in
-            if phase == .active { checkUDID() }
+        .onAppear {
+            checkUDID()
+            checkNetwork()
         }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                checkUDID()
+                checkNetwork()
+            }
+        }
+        .overlay(alignment: .top) {
+            // 没网络也能进软件：顶部提示条引导去连网，不挡住任何界面
+            if !networkOK {
+                HStack(spacing: 8) {
+                    Image(systemName: "wifi.exclamationmark")
+                    Text("未连接网络，请检查网络连接")
+                        .font(.footnote)
+                    Button("去连接") { openWifiSettings() }
+                        .font(.footnote.bold())
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.red.opacity(0.92))
+                .foregroundStyle(.white)
+                .clipShape(Capsule())
+                .padding(.top, 4)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: networkOK)
         .alert("需要获取设备 UDID", isPresented: $showUDIDAlert) {
             Button("去获取") { openUDIDPage() }
         } message: {
@@ -63,6 +90,24 @@ struct ContentView: View {
     private func checkUDID() {
         let udid = UserDefaults.standard.string(forKey: "lastUDID") ?? ""
         showUDIDAlert = udid.isEmpty
+    }
+
+    /// 轻量网络检测：探测后台地址，5 秒超时；失败只显示提示，App 照常可用
+    private func checkNetwork() {
+        guard let url = URL(string: "https://ios.zhaisir.cn/api/content") else { return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 5
+        URLSession.shared.dataTask(with: req) { _, resp, _ in
+            let ok = (resp as? HTTPURLResponse)?.statusCode == 200
+            DispatchQueue.main.async { networkOK = ok }
+        }.resume()
+    }
+
+    /// 去连接网络：打开系统 Wi-Fi 设置
+    private func openWifiSettings() {
+        if let url = URL(string: "App-Prefs:root=WIFI") {
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        }
     }
 
     /// 打开 UDID 获取页（Safari 安装描述文件）
@@ -532,7 +577,9 @@ struct HomeView: View {
     func fetchCloudApp() async {
         guard let url = URL(string: backendBase + "/api/content") else { return }
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 8   // 没网/隧道断时快速兜底，不一直转圈
+            let (data, _) = try await URLSession.shared.data(for: req)
             guard let remote = try? JSONDecoder().decode(RemoteContent.self, from: data),
                   let app = remote.app else { return }
             appName = app.name
