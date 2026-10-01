@@ -2321,39 +2321,44 @@ struct DownloadView: View {
         }
         let name = pendingInstallName
         Task {
-            do {
-                let data = try Data(contentsOf: url)
-                var req = URLRequest(url: URL(string: "https://ios.zhaisir.cn/upload_app")!)
-                req.httpMethod = "POST"
-                req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-                req.setValue(name, forHTTPHeaderField: "X-Filename")
-                req.timeoutInterval = 600
-                let cfg = URLSessionConfiguration.ephemeral
-                cfg.timeoutIntervalForRequest = 600
-                cfg.timeoutIntervalForResource = 900
-                let delegate = SelfSignedSessionDelegate()
-                let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
-                let (respData, _) = try await session.upload(for: req, from: data)
-                if let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
-                   let ok = obj["ok"] as? Bool, ok,
-                   let plist = obj["plist"] as? String,
-                   let enc = plist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-                    let itms = "itms-services://?action=download-manifest&url=\(enc)"
-                    // 存起来：下次点安装直接秒开，不再上传
-                    if let idx = downloader.signedItems.firstIndex(where: { $0.path == url }) {
-                        downloader.signedItems[idx].installURL = itms
+            // 隧道容易瞬时断：自动重试 3 次（间隔 5 秒），减少「安装服务未响应」
+            for attempt in 1...3 {
+                do {
+                    let data = try Data(contentsOf: url)
+                    var req = URLRequest(url: URL(string: "https://ios.zhaisir.cn/upload_app")!)
+                    req.httpMethod = "POST"
+                    req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+                    req.setValue(name, forHTTPHeaderField: "X-Filename")
+                    req.timeoutInterval = 300
+                    let cfg = URLSessionConfiguration.ephemeral
+                    cfg.timeoutIntervalForRequest = 300
+                    cfg.timeoutIntervalForResource = 600
+                    let delegate = SelfSignedSessionDelegate()
+                    let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
+                    let (respData, _) = try await session.upload(for: req, from: data)
+                    if let obj = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
+                       let ok = obj["ok"] as? Bool, ok,
+                       let plist = obj["plist"] as? String,
+                       let enc = plist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                        let itms = "itms-services://?action=download-manifest&url=\(enc)"
+                        // 存起来：下次点安装直接秒开，不再上传
+                        if let idx = downloader.signedItems.firstIndex(where: { $0.path == url }) {
+                            downloader.signedItems[idx].installURL = itms
+                        }
+                        if let u = URL(string: itms) {
+                            UIApplication.shared.open(u, options: [:]) { _ in }
+                            return
+                        }
                     }
-                    if let u = URL(string: itms) {
-                        UIApplication.shared.open(u, options: [:]) { _ in }
-                        return
-                    }
+                } catch {
+                    // 失败就等 5 秒重试
                 }
-                signMessage = "安装服务未响应，请到「已签名」用全能签安装"
-                showSignResult = true
-            } catch {
-                signMessage = "无法连接安装服务器，请到「已签名」用全能签安装"
-                showSignResult = true
+                if attempt < 3 {
+                    try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+                }
             }
+            signMessage = "安装服务未响应（已自动重试 3 次），请到「已签名」用全能签安装"
+            showSignResult = true
         }
     }
 
